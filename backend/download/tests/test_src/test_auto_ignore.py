@@ -71,8 +71,12 @@ def test_filter_is_reloaded_and_missing_channels_are_allowed():
 
 
 @pytest.mark.parametrize("auto_only", [False, True])
-def test_ignored_video_is_skipped_without_failing_queue(auto_only):
+@pytest.mark.parametrize("add_metadata", [False, True, "simple"])
+def test_ignored_video_is_skipped_without_failing_queue(
+    auto_only, add_metadata
+):
     downloader = object.__new__(VideoDownloader)
+    downloader.config = {"downloads": {"add_metadata": add_metadata}}
     downloader.task = Mock()
     downloader.task.is_stopped.return_value = False
     downloader._reset_auto = Mock()
@@ -86,7 +90,8 @@ def test_ignored_video_is_skipped_without_failing_queue(auto_only):
     with (
         patch(f"{MODULE}.YoutubeChannel") as channel,
         patch(f"{MODULE}.PendingInteract") as pending,
-        patch(f"{MODULE}.index_new_video"),
+        patch(f"{MODULE}.index_new_video") as index,
+        patch(f"{MODULE}.YoutubeVideo") as video,
         patch(f"{MODULE}.RedisQueue"),
         patch(f"{MODULE}.DownloadPostProcess"),
     ):
@@ -102,4 +107,12 @@ def test_ignored_video_is_skipped_without_failing_queue(auto_only):
             "regular-id", "other-id"
         )
         downloader._delete_from_pending.assert_called_once_with("regular-id")
-        downloader.move_to_archive.assert_called_once()
+        downloader.move_to_archive.assert_called_once_with(index.return_value)
+        if add_metadata == "simple":
+            video.assert_called_once_with("regular-id")
+            assert video.return_value.json_data is index.return_value
+            video.return_value.embed_metadata.assert_called_once_with(
+                from_download=True
+            )
+        else:
+            video.assert_not_called()
