@@ -7,6 +7,7 @@ functionality:
 """
 
 import os
+import re
 import shutil
 from datetime import datetime
 
@@ -23,6 +24,7 @@ from common.src.helper import (
 from common.src.ta_redis import RedisQueue
 from common.src.urlparser import ParsedURLType
 from download.src.queue import PendingList
+from download.src.queue_interact import PendingInteract
 from download.src.yt_dlp_base import YtWrap
 from playlist.src.index import YoutubePlaylist
 from video.src.comments import CommentList
@@ -65,6 +67,9 @@ class VideoDownloader(DownloaderBase):
                 self._reset_auto()
                 break
 
+            if self._auto_ignore(video_data):
+                continue
+
             if downloaded > 0:
                 rand_sleep(self.config)
 
@@ -93,6 +98,31 @@ class VideoDownloader(DownloaderBase):
         DownloadPostProcess(self.task).run()
 
         return downloaded, failed
+
+    def _auto_ignore(self, video_data) -> bool:
+        """check current channel settings before downloading a queued video"""
+        channel = YoutubeChannel(video_data["channel_id"])
+        channel.get_from_es()
+        if not channel.json_data:
+            return False
+
+        pattern = channel.get_overwrites().get("auto_ignore_filter")
+        title = video_data.get("title")
+        if not pattern or not title:
+            return False
+
+        try:
+            if re.search(pattern, title) is None:
+                return False
+        except re.error as err:
+            print(f"{channel.youtube_id}: invalid auto-ignore filter: {err}")
+            return False
+
+        youtube_id = video_data["youtube_id"]
+        PendingInteract(youtube_id=youtube_id, status="ignore").update_status()
+        self._notify(video_data, "Auto-ignored by channel title filter")
+        print(f"{youtube_id}: auto-ignored by channel title filter")
+        return True
 
     def _notify(self, video_data, message, progress=False):
         """send progress notification to task"""
