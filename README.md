@@ -1,3 +1,19 @@
+This fork follows upstream [Tube Archivist](https://github.com/tubearchivist/tubearchivist) plus ordered patches [0001](https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/0001-remove-upstream-ai-policy.patch), [0002](https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/0002-fork-runtime-defaults.patch), [0003](https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/0003-channel-title-filtering.patch), [0004](https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/0004-simple-download-only-metadata-embedding.patch), [0005](https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/0005-channel-rolling-window.patch). `patch-queue` owns patches and workflows; generated `main` contains upstream source plus the full queue. Stable builds follow upstream releases; nightly builds follow `develop`.
+
+# Patched Tube Archivist
+
+Patch 0005 uses subscription page size for rolling windows, then deletes and ignores out-of-window regular videos after downloads finish.
+
+Applied patches, oldest first:
+
+1. [0001-remove-upstream-ai-policy.patch](https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/0001-remove-upstream-ai-policy.patch)
+2. [0002-fork-runtime-defaults.patch](https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/0002-fork-runtime-defaults.patch)
+3. [0003-channel-title-filtering.patch](https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/0003-channel-title-filtering.patch)
+4. [0004-simple-download-only-metadata-embedding.patch](https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/0004-simple-download-only-metadata-embedding.patch)
+5. [0005-channel-rolling-window.patch](https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/0005-channel-rolling-window.patch)
+
+---
+
 ![Tube Archivist](assets/tube-archivist-front.jpg?raw=true "Tube Archivist Banner")
 [*more screenshots and video*](SHOWCASE.MD)
 
