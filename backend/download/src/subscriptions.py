@@ -46,7 +46,10 @@ class ChannelSubscription:
             flat=self.config["subscriptions"].get("extract_flat", False),
         )
         added = pending_handler.parse_url_list()
+        from download.src.rolling_window import reconcile_windows
 
+        if not self.task or not self.task.is_stopped():
+            reconcile_windows(self.config, self.task)
         return added
 
     def _process_channel_urls(self, all_channels: list[dict]):
@@ -65,6 +68,12 @@ class ChannelSubscription:
                 channel_overwrites=channel.get("channel_overwrites", {}),
             ).build_queries(vid_types=enums)
 
+            from download.src.rolling_window import window_size
+
+            size = window_size(channel.get("channel_overwrites", {}))
+            if size and any(q[0] == VideoTypeEnum.VIDEOS for q in queries):
+                queries = [q for q in queries if q[0] != VideoTypeEnum.VIDEOS]
+                queries.append((VideoTypeEnum.VIDEOS, size))
             for vid_type, limit in queries:
                 all_channel_urls.append(
                     ParsedURLType(

@@ -265,6 +265,7 @@ class YoutubeChannel(YouTubeItem):
     def set_overwrites(self, overwrites):
         """set per channel overwrites"""
         valid_keys = [
+            "rolling_window_size",
             "auto_ignore_filter",
             "download_format",
             "autodelete_days",
