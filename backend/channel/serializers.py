@@ -2,6 +2,8 @@
 
 # pylint: disable=abstract-method
 
+import re
+
 from common.serializers import PaginationSerializer, ValidateUnknownFieldsMixin
 from rest_framework import serializers
 from video.src.constants import VideoTypeEnum
@@ -12,6 +14,12 @@ class ChannelOverwriteSerializer(
 ):
     """serialize channel overwrites"""
 
+    auto_ignore_filter = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        trim_whitespace=False,
+    )
     download_format = serializers.CharField(required=False, allow_null=True)
     autodelete_days = serializers.IntegerField(required=False, allow_null=True)
     index_playlists = serializers.BooleanField(required=False, allow_null=True)
@@ -27,6 +35,18 @@ class ChannelOverwriteSerializer(
     subscriptions_shorts_channel_size = serializers.IntegerField(
         required=False, allow_null=True
     )
+
+    def validate_auto_ignore_filter(self, value):
+        """reject invalid title filters before saving channel settings"""
+        if value:
+            try:
+                re.compile(value)
+            except re.error as err:
+                raise serializers.ValidationError(
+                    f"Invalid regular expression: {err}"
+                ) from err
+
+        return value
 
 
 class ChannelSerializer(serializers.Serializer):

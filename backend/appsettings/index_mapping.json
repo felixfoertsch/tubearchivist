@@ -52,6 +52,10 @@
                 },
                 "channel_overwrites": {
                     "properties": {
+                        "auto_ignore_filter": {
+                            "type": "keyword",
+                            "index": false
+                        },
                         "download_format": {
                             "type": "text"
                         },
@@ -167,6 +171,10 @@
                         },
                         "channel_overwrites": {
                             "properties": {
+                                "auto_ignore_filter": {
+                                    "type": "keyword",
+                                    "index": false
+                                },
                                 "download_format": {
                                     "type": "text"
                                 },
