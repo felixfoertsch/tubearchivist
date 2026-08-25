@@ -9,6 +9,17 @@ from rest_framework import serializers
 from video.src.constants import VideoTypeEnum
 
 
+class RollingWindowSizeField(serializers.IntegerField):
+    """Do not coerce JSON booleans, strings or floating-point numbers."""
+
+    def to_internal_value(self, data):
+        if type(data) is not int or not 1 <= data <= 2147483647:
+            raise serializers.ValidationError(
+                "Must be an integer from 1 to 2147483647 or null."
+            )
+        return data
+
+
 class ChannelOverwriteSerializer(
     ValidateUnknownFieldsMixin, serializers.Serializer
 ):
@@ -19,6 +30,9 @@ class ChannelOverwriteSerializer(
         allow_null=True,
         allow_blank=True,
         trim_whitespace=False,
+    )
+    rolling_window_size = RollingWindowSizeField(
+        required=False, allow_null=True, min_value=1, max_value=2147483647
     )
     download_format = serializers.CharField(required=False, allow_null=True)
     autodelete_days = serializers.IntegerField(required=False, allow_null=True)
