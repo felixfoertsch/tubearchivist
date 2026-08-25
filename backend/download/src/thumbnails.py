@@ -216,7 +216,7 @@ class ThumbManager(ThumbManagerBase):
         img_raw = img_raw.resize((336, 189))
         img_raw.convert("RGB").save(thumb_path)
 
-    def embed_video_art(self, json_data: dict):
+    def embed_video_art(self, json_data: dict, *, simple=False):
         """embed video artwork"""
         file_path = os.path.join(self.MEDIA_DIR, json_data["media_url"])
         if not os.path.exists(file_path):
@@ -233,6 +233,10 @@ class ThumbManager(ThumbManagerBase):
             video["covr"] = [
                 MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)
             ]
+
+        if simple:
+            video.save()
+            return
 
         channel_id = json_data["channel"]["channel_id"]
         banner_path = os.path.join(
