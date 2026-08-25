@@ -43,7 +43,7 @@ class AppConfigDownloadsSerializer(
     autodelete_days = serializers.IntegerField(allow_null=True)
     format = serializers.CharField(allow_null=True)
     format_sort = serializers.CharField(allow_null=True)
-    add_metadata = serializers.BooleanField()
+    add_metadata = serializers.ChoiceField(choices=[False, True, "simple"])
     subtitle = serializers.CharField(allow_null=True)
     subtitle_source = serializers.ChoiceField(
         choices=["auto", "user"], allow_null=True
