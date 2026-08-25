@@ -1,0 +1,40 @@
+From cd9c7b4873a01a28437dc812d6377939832887dd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Felix=20F=C3=B6rtsch?= <mail@felixfoertsch.de>
+Date: Fri, 2 Oct 2026 14:49:12 +0200
+Subject: [PATCH] ci: remove AI restrictions and set up automatic build
+ pipeline
+
+Replace upstream-only deployment tooling with validated GHCR builds for
+this fork and point Compose at the fork image. Remove the inherited AI
+restrictions.
+
+Track the upstream boundary explicitly and replay the linear fork stack
+on upstream develop, stopping on conflicts, empty patches, merge commits,
+or upstream history rewrites. Test the replay safeguards using real local
+Git repositories. Validate lint, backend tests and the frontend build
+before building amd64 and arm64 candidate images.
+
+Update the stack and upstream boundary atomically with explicit leases,
+then promote the validated image to latest/develop and create a release.
+Keep fork/patch-stack validation read-only until the history is activated.
+Document maintenance, failure notifications and recovery in FORK.md.
+---
+ docker-compose.yml | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 41c2ecd8..2b49243d 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -2,7 +2,8 @@ services:
+   tubearchivist:
+     container_name: tubearchivist
+     restart: unless-stopped
+-    image: bbilly1/tubearchivist
++    image: ghcr.io/felixfoertsch/tubearchivist:latest
++    pull_policy: always
+     ports:
+       - 8000:8000
+     volumes:
+-- 
+2.54.0 (Apple Git-157)
