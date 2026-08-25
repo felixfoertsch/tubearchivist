@@ -1,6 +1,7 @@
 import { useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import ChannelOverview from '../components/ChannelOverview';
 import ChannelAutoIgnoreFilter from '../components/ChannelAutoIgnoreFilter';
+import ChannelRollingWindow from '../components/ChannelRollingWindow';
 import { useEffect, useState } from 'react';
 import loadChannelById, { ChannelResponseType } from '../api/loader/loadChannelById';
 import Linkify from '../components/Linkify';
@@ -386,6 +387,13 @@ const ChannelAbout = () => {
               </div>
             </div>
           </div>
+        )}
+        {isAdmin && (
+          <ChannelRollingWindow
+            key={channel.channel_id}
+            channelId={channel.channel_id}
+            initialValue={channel.channel_overwrites?.rolling_window_size}
+          />
         )}
         {isAdmin && (
           <ChannelAutoIgnoreFilter
