@@ -435,8 +435,11 @@ class YoutubeVideo(YouTubeItem, YoutubeSubtitle):
 
         return subtitles
 
-    def embed_metadata(self):
-        """embed metadata for video"""
+    def embed_metadata(self, *, from_download=False):
+        """embed full metadata, or static tags only at download time"""
+        mode = self.config["downloads"].get("add_metadata")
+        if mode is not True and not (mode == "simple" and from_download):
+            return
         if not self.json_data:
             self.get_from_es()
 
@@ -444,14 +447,18 @@ class YoutubeVideo(YouTubeItem, YoutubeSubtitle):
             print(f"{self.youtube_id}: skip embed, video not indexed")
             return
 
-        if self.config["downloads"].get("add_metadata"):
-            try:
-                self._embed_text_data()
+        try:
+            self._embed_text_data(simple=mode == "simple")
+            if mode == "simple":
+                ThumbManager(self.youtube_id).embed_video_art(
+                    self.json_data, simple=True
+                )
+            else:
                 self._embed_artwork()
-            except MP4MetadataError as err:
-                print(f"{self.youtube_id}: embed failed: '{str(err)}'")
+        except MP4MetadataError as err:
+            print(f"{self.youtube_id}: embed failed: '{str(err)}'")
 
-    def _embed_text_data(self):
+    def _embed_text_data(self, *, simple=False):
         """embed text metadata"""
         print(f"{self.youtube_id}: embed metadata")
         video_base = EnvironmentSettings.MEDIA_DIR
@@ -464,8 +471,6 @@ class YoutubeVideo(YouTubeItem, YoutubeSubtitle):
         title = self.json_data["title"]
         artist = self.json_data["channel"]["channel_name"]
         description = self.json_data.get("description", "")
-        to_embed = self._get_to_embed()
-
         video = MP4(file_path)
         video["\xa9nam"] = [title]  # title
         video["\xa9ART"] = [artist]  # artist
@@ -473,7 +478,9 @@ class YoutubeVideo(YouTubeItem, YoutubeSubtitle):
             video["desc"] = [description]  # description
             video["ldes"] = [description]  # synopsis
 
-        video["----:com.tubearchivist:ta"] = [to_embed.encode("utf-8")]
+        if not simple:
+            to_embed = self._get_to_embed()
+            video["----:com.tubearchivist:ta"] = [to_embed.encode("utf-8")]
         video.save()
 
     def _get_to_embed(self) -> str:
