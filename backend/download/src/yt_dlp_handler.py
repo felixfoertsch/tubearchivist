@@ -91,6 +91,10 @@ class VideoDownloader(DownloaderBase):
 
             self._notify(video_data, "Move downloaded file to archive")
             self.move_to_archive(vid_dict)
+            if self.config["downloads"].get("add_metadata") == "simple":
+                video = YoutubeVideo(youtube_id)
+                video.json_data = vid_dict
+                video.embed_metadata(from_download=True)
             self._delete_from_pending(youtube_id)
             downloaded += 1
 
@@ -217,7 +221,7 @@ class VideoDownloader(DownloaderBase):
         """add postprocessor to obs"""
         postprocessors = []
 
-        if self.config["downloads"]["add_metadata"]:
+        if self.config["downloads"]["add_metadata"] is True:
             # full metadata is added in DownloadPostProcess
             postprocessors.append(
                 {
@@ -520,7 +524,7 @@ class DownloadPostProcess(DownloaderBase):
 
     def embed_metadata(self):
         """embed metadata in media file"""
-        if not self.config["downloads"].get("add_metadata"):
+        if self.config["downloads"].get("add_metadata") is not True:
             return
 
         queue = RedisQueue(self.VIDEO_QUEUE)
