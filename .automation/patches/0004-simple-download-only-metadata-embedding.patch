@@ -1,0 +1,433 @@
+From 522be794dbd01767e1630303c633dd0d9bb20baf Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Felix=20F=C3=B6rtsch?= <mail@felixfoertsch.de>
+Date: Fri, 2 Oct 2026 14:49:50 +0200
+Subject: [PATCH] feat: add simple download-only metadata embedding
+
+Add Off, Full and Simple embedding modes while preserving existing
+boolean settings. Simple writes static title, artist, description and
+thumbnail only when a video is downloaded; later refreshes leave media
+files untouched. Full retains the existing archive and artwork behavior.
+
+Include embedding regression tests and initialize the download-queue
+test configuration. Exercise all three modes so ignored videos never
+enter the download-only embedding path and normal downloads still do.
+---
+ backend/appsettings/serializers.py            |   2 +-
+ backend/appsettings/src/config.py             |   2 +-
+ backend/download/src/thumbnails.py            |   6 +-
+ backend/download/src/yt_dlp_handler.py        |   8 +-
+ .../tests/test_src/test_auto_ignore.py        |  19 ++-
+ backend/video/src/index.py                    |  29 ++--
+ .../video/tests/test_src/test_embedding.py    | 135 ++++++++++++++++++
+ .../src/api/loader/loadAppsettingsConfig.ts   |   2 +-
+ frontend/src/pages/Home.tsx                   |   2 +-
+ frontend/src/pages/SettingsApplication.tsx    |  30 +++-
+ 10 files changed, 207 insertions(+), 28 deletions(-)
+ create mode 100644 backend/video/tests/test_src/test_embedding.py
+
+diff --git a/backend/appsettings/serializers.py b/backend/appsettings/serializers.py
+index f26bc73d..b97afc75 100644
+--- a/backend/appsettings/serializers.py
++++ b/backend/appsettings/serializers.py
+@@ -43,7 +43,7 @@ class AppConfigDownloadsSerializer(
+     autodelete_days = serializers.IntegerField(allow_null=True)
+     format = serializers.CharField(allow_null=True)
+     format_sort = serializers.CharField(allow_null=True)
+-    add_metadata = serializers.BooleanField()
++    add_metadata = serializers.ChoiceField(choices=[False, True, "simple"])
+     subtitle = serializers.CharField(allow_null=True)
+     subtitle_source = serializers.ChoiceField(
+         choices=["auto", "user"], allow_null=True
+diff --git a/backend/appsettings/src/config.py b/backend/appsettings/src/config.py
+index 8bd81579..26ef5efb 100644
+--- a/backend/appsettings/src/config.py
++++ b/backend/appsettings/src/config.py
+@@ -34,7 +34,7 @@ class DownloadsConfigType(TypedDict):
+     autodelete_days: int | None
+     format: str | None
+     format_sort: str | None
+-    add_metadata: bool
++    add_metadata: bool | Literal["simple"]
+     subtitle: str | None
+     subtitle_source: Literal["user", "auto"] | None
+     subtitle_index: bool
+diff --git a/backend/download/src/thumbnails.py b/backend/download/src/thumbnails.py
+index 5004f932..7634ac48 100644
+--- a/backend/download/src/thumbnails.py
++++ b/backend/download/src/thumbnails.py
+@@ -216,7 +216,7 @@ class ThumbManager(ThumbManagerBase):
+         img_raw = img_raw.resize((336, 189))
+         img_raw.convert("RGB").save(thumb_path)
+ 
+-    def embed_video_art(self, json_data: dict):
++    def embed_video_art(self, json_data: dict, *, simple=False):
+         """embed video artwork"""
+         file_path = os.path.join(self.MEDIA_DIR, json_data["media_url"])
+         if not os.path.exists(file_path):
+@@ -234,6 +234,10 @@ class ThumbManager(ThumbManagerBase):
+                 MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)
+             ]
+ 
++        if simple:
++            video.save()
++            return
++
+         channel_id = json_data["channel"]["channel_id"]
+         banner_path = os.path.join(
+             self.CHANNEL_DIR, f"{channel_id}_banner.jpg"
+diff --git a/backend/download/src/yt_dlp_handler.py b/backend/download/src/yt_dlp_handler.py
+index 3dd98123..ccb110e5 100644
+--- a/backend/download/src/yt_dlp_handler.py
++++ b/backend/download/src/yt_dlp_handler.py
+@@ -91,6 +91,10 @@ class VideoDownloader(DownloaderBase):
+ 
+             self._notify(video_data, "Move downloaded file to archive")
+             self.move_to_archive(vid_dict)
++            if self.config["downloads"].get("add_metadata") == "simple":
++                video = YoutubeVideo(youtube_id)
++                video.json_data = vid_dict
++                video.embed_metadata(from_download=True)
+             self._delete_from_pending(youtube_id)
+             downloaded += 1
+ 
+@@ -217,7 +221,7 @@ class VideoDownloader(DownloaderBase):
+         """add postprocessor to obs"""
+         postprocessors = []
+ 
+-        if self.config["downloads"]["add_metadata"]:
++        if self.config["downloads"]["add_metadata"] is True:
+             # full metadata is added in DownloadPostProcess
+             postprocessors.append(
+                 {
+@@ -520,7 +524,7 @@ class DownloadPostProcess(DownloaderBase):
+ 
+     def embed_metadata(self):
+         """embed metadata in media file"""
+-        if not self.config["downloads"].get("add_metadata"):
++        if self.config["downloads"].get("add_metadata") is not True:
+             return
+ 
+         queue = RedisQueue(self.VIDEO_QUEUE)
+diff --git a/backend/download/tests/test_src/test_auto_ignore.py b/backend/download/tests/test_src/test_auto_ignore.py
+index 641c6f9c..8e404bf0 100644
+--- a/backend/download/tests/test_src/test_auto_ignore.py
++++ b/backend/download/tests/test_src/test_auto_ignore.py
+@@ -71,8 +71,12 @@ def test_filter_is_reloaded_and_missing_channels_are_allowed():
+ 
+ 
+ @pytest.mark.parametrize("auto_only", [False, True])
+-def test_ignored_video_is_skipped_without_failing_queue(auto_only):
++@pytest.mark.parametrize("add_metadata", [False, True, "simple"])
++def test_ignored_video_is_skipped_without_failing_queue(
++    auto_only, add_metadata
++):
+     downloader = object.__new__(VideoDownloader)
++    downloader.config = {"downloads": {"add_metadata": add_metadata}}
+     downloader.task = Mock()
+     downloader.task.is_stopped.return_value = False
+     downloader._reset_auto = Mock()
+@@ -86,7 +90,8 @@ def test_ignored_video_is_skipped_without_failing_queue(auto_only):
+     with (
+         patch(f"{MODULE}.YoutubeChannel") as channel,
+         patch(f"{MODULE}.PendingInteract") as pending,
+-        patch(f"{MODULE}.index_new_video"),
++        patch(f"{MODULE}.index_new_video") as index,
++        patch(f"{MODULE}.YoutubeVideo") as video,
+         patch(f"{MODULE}.RedisQueue"),
+         patch(f"{MODULE}.DownloadPostProcess"),
+     ):
+@@ -102,4 +107,12 @@ def test_ignored_video_is_skipped_without_failing_queue(auto_only):
+             "regular-id", "other-id"
+         )
+         downloader._delete_from_pending.assert_called_once_with("regular-id")
+-        downloader.move_to_archive.assert_called_once()
++        downloader.move_to_archive.assert_called_once_with(index.return_value)
++        if add_metadata == "simple":
++            video.assert_called_once_with("regular-id")
++            assert video.return_value.json_data is index.return_value
++            video.return_value.embed_metadata.assert_called_once_with(
++                from_download=True
++            )
++        else:
++            video.assert_not_called()
+diff --git a/backend/video/src/index.py b/backend/video/src/index.py
+index 6dbf4804..29759b7f 100644
+--- a/backend/video/src/index.py
++++ b/backend/video/src/index.py
+@@ -435,8 +435,11 @@ class YoutubeVideo(YouTubeItem, YoutubeSubtitle):
+ 
+         return subtitles
+ 
+-    def embed_metadata(self):
+-        """embed metadata for video"""
++    def embed_metadata(self, *, from_download=False):
++        """embed full metadata, or static tags only at download time"""
++        mode = self.config["downloads"].get("add_metadata")
++        if mode is not True and not (mode == "simple" and from_download):
++            return
+         if not self.json_data:
+             self.get_from_es()
+ 
+@@ -444,14 +447,18 @@ class YoutubeVideo(YouTubeItem, YoutubeSubtitle):
+             print(f"{self.youtube_id}: skip embed, video not indexed")
+             return
+ 
+-        if self.config["downloads"].get("add_metadata"):
+-            try:
+-                self._embed_text_data()
++        try:
++            self._embed_text_data(simple=mode == "simple")
++            if mode == "simple":
++                ThumbManager(self.youtube_id).embed_video_art(
++                    self.json_data, simple=True
++                )
++            else:
+                 self._embed_artwork()
+-            except MP4MetadataError as err:
+-                print(f"{self.youtube_id}: embed failed: '{str(err)}'")
++        except MP4MetadataError as err:
++            print(f"{self.youtube_id}: embed failed: '{str(err)}'")
+ 
+-    def _embed_text_data(self):
++    def _embed_text_data(self, *, simple=False):
+         """embed text metadata"""
+         print(f"{self.youtube_id}: embed metadata")
+         video_base = EnvironmentSettings.MEDIA_DIR
+@@ -464,8 +471,6 @@ class YoutubeVideo(YouTubeItem, YoutubeSubtitle):
+         title = self.json_data["title"]
+         artist = self.json_data["channel"]["channel_name"]
+         description = self.json_data.get("description", "")
+-        to_embed = self._get_to_embed()
+-
+         video = MP4(file_path)
+         video["\xa9nam"] = [title]  # title
+         video["\xa9ART"] = [artist]  # artist
+@@ -473,7 +478,9 @@ class YoutubeVideo(YouTubeItem, YoutubeSubtitle):
+             video["desc"] = [description]  # description
+             video["ldes"] = [description]  # synopsis
+ 
+-        video["----:com.tubearchivist:ta"] = [to_embed.encode("utf-8")]
++        if not simple:
++            to_embed = self._get_to_embed()
++            video["----:com.tubearchivist:ta"] = [to_embed.encode("utf-8")]
+         video.save()
+ 
+     def _get_to_embed(self) -> str:
+diff --git a/backend/video/tests/test_src/test_embedding.py b/backend/video/tests/test_src/test_embedding.py
+new file mode 100644
+index 00000000..7dfa7857
+--- /dev/null
++++ b/backend/video/tests/test_src/test_embedding.py
+@@ -0,0 +1,135 @@
++"""Embedding modes keep archived files stable unless full mode is selected."""
++
++import unittest
++from unittest.mock import MagicMock, patch
++
++from appsettings.serializers import AppConfigDownloadsSerializer
++from django.conf import settings
++from download.src.thumbnails import ThumbManager
++from download.src.yt_dlp_handler import DownloadPostProcess, VideoDownloader
++from video.src.index import YoutubeVideo
++
++
++class EmbeddingTests(unittest.TestCase):
++    """Exercise mode validation and MP4 writes without network or media IO."""
++
++    @classmethod
++    def setUpClass(cls):
++        """Allow standalone unittest runs without starting Django services."""
++        if not settings.configured:
++            settings.configure(USE_I18N=False)
++
++    def make_video(self, mode):
++        """Avoid constructor network configuration reads."""
++        video = object.__new__(YoutubeVideo)
++        video.youtube_id = "test-video"
++        video.config = {"downloads": {"add_metadata": mode}}
++        video.json_data = {
++            "title": "Title",
++            "description": "Description",
++            "channel": {"channel_name": "Artist", "channel_id": "channel"},
++            "media_url": "channel/test-video.mp4",
++        }
++        return video
++
++    def test_modes_validate_and_preserve_booleans(self):
++        """Existing settings remain valid; arbitrary strings are rejected."""
++        for mode in (False, True, "simple"):
++            serializer = AppConfigDownloadsSerializer(
++                data={"add_metadata": mode}, partial=True
++            )
++            self.assertTrue(serializer.is_valid(), serializer.errors)
++            self.assertEqual(serializer.validated_data["add_metadata"], mode)
++        serializer = AppConfigDownloadsSerializer(
++            data={"add_metadata": "invalid"}, partial=True
++        )
++        self.assertFalse(serializer.is_valid())
++
++    def test_off_and_simple_refresh_do_not_touch_files(self):
++        """All non-download callers use the default read-only simple path."""
++        for mode, from_download in (
++            (False, False),
++            (False, True),
++            ("simple", False),
++        ):
++            video = self.make_video(mode)
++            with patch.object(video, "_embed_text_data") as text, patch.object(
++                video, "_embed_artwork"
++            ) as art, patch.object(video, "get_from_es") as fetch:
++                video.embed_metadata(from_download=from_download)
++                text.assert_not_called()
++                art.assert_not_called()
++                fetch.assert_not_called()
++
++    def test_full_retains_refresh_embedding(self):
++        """Full mode keeps existing archive and artwork behavior."""
++        video = self.make_video(True)
++        with patch.object(video, "_embed_text_data") as text, patch.object(
++            video, "_embed_artwork"
++        ) as art:
++            video.embed_metadata()
++            text.assert_called_once_with(simple=False)
++            art.assert_called_once_with()
++
++    def test_simple_download_has_only_static_text_tags(self):
++        """No archive JSON or stats are generated for simple downloads."""
++        video = self.make_video("simple")
++        tags = MagicMock()
++        with patch("video.src.index.MP4", return_value=tags), patch(
++            "video.src.index.os.path.exists", return_value=True
++        ), patch("video.src.index.ThumbManager") as thumbs, patch.object(
++            video, "_get_to_embed"
++        ) as archive:
++            video.embed_metadata(from_download=True)
++            self.assertEqual(
++                tags.__setitem__.call_args_list,
++                [
++                    unittest.mock.call("\xa9nam", ["Title"]),
++                    unittest.mock.call("\xa9ART", ["Artist"]),
++                    unittest.mock.call("desc", ["Description"]),
++                    unittest.mock.call("ldes", ["Description"]),
++                ],
++            )
++            tags.save.assert_called_once_with()
++            archive.assert_not_called()
++            thumbs.return_value.embed_video_art.assert_called_once_with(
++                video.json_data, simple=True
++            )
++
++    def test_simple_skips_queue_and_full_chapter_postprocessor(self):
++        """Simple must not re-embed queue entries or add dynamic chapters."""
++        postprocess = object.__new__(DownloadPostProcess)
++        postprocess.config = {"downloads": {"add_metadata": "simple"}}
++        with patch("download.src.yt_dlp_handler.RedisQueue") as queue:
++            postprocess.embed_metadata()
++            queue.assert_not_called()
++        downloader = object.__new__(VideoDownloader)
++        downloader.config = postprocess.config
++        downloader.obs = {}
++        downloader._build_obs_postprocessors()
++        self.assertEqual(downloader.obs["postprocessors"], [])
++
++    def test_simple_artwork_writes_cover_only(self):
++        """Channel and playlist artwork never enter simple MP4s."""
++        manager = object.__new__(ThumbManager)
++        manager.item_id = "test-video"
++        tags = MagicMock()
++        with patch("download.src.thumbnails.MP4", return_value=tags), patch(
++            "download.src.thumbnails.os.path.exists", return_value=True
++        ), patch.object(
++            manager, "vid_thumb_path", return_value="thumb.jpg"
++        ), patch(
++            "builtins.open", unittest.mock.mock_open(read_data=b"thumbnail")
++        ), patch.object(
++            manager, "_embed_art_item"
++        ) as extra:
++            manager.embed_video_art(
++                self.make_video("simple").json_data, simple=True
++            )
++            self.assertEqual(tags.__setitem__.call_args.args[0], "covr")
++            tags.save.assert_called_once_with()
++            extra.assert_not_called()
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/frontend/src/api/loader/loadAppsettingsConfig.ts b/frontend/src/api/loader/loadAppsettingsConfig.ts
+index 47b1ba3a..84f7ab07 100644
+--- a/frontend/src/api/loader/loadAppsettingsConfig.ts
++++ b/frontend/src/api/loader/loadAppsettingsConfig.ts
+@@ -15,7 +15,7 @@ export type AppSettingsConfigType = {
+     autodelete_days: number | null;
+     format: string | null;
+     format_sort: string | null;
+-    add_metadata: boolean;
++    add_metadata: boolean | 'simple';
+     subtitle: string | null;
+     subtitle_source: string | null;
+     subtitle_index: boolean;
+diff --git a/frontend/src/pages/Home.tsx b/frontend/src/pages/Home.tsx
+index 09ac57f9..0aea82fb 100644
+--- a/frontend/src/pages/Home.tsx
++++ b/frontend/src/pages/Home.tsx
+@@ -88,7 +88,7 @@ export type DownloadsType = {
+   autodelete_days: boolean;
+   format: boolean;
+   format_sort: boolean;
+-  add_metadata: boolean;
++  add_metadata: boolean | 'simple';
+   subtitle: boolean;
+   subtitle_source: boolean;
+   subtitle_index: boolean;
+diff --git a/frontend/src/pages/SettingsApplication.tsx b/frontend/src/pages/SettingsApplication.tsx
+index 9b00efad..3c10f421 100644
+--- a/frontend/src/pages/SettingsApplication.tsx
++++ b/frontend/src/pages/SettingsApplication.tsx
+@@ -55,7 +55,7 @@ const SettingsApplication = () => {
+   const [downloadsFormat, setDownloadsFormat] = useState<string | null>(null);
+   const [downloadsFormatSort, setDownloadsFormatSort] = useState<string | null>(null);
+   const [downloadsExtractorLang, setDownloadsExtractorLang] = useState<string | null>(null);
+-  const [embedMetadata, setEmbedMetadata] = useState(false);
++  const [embedMetadata, setEmbedMetadata] = useState<boolean | 'simple'>(false);
+ 
+   // Subtitles
+   const [subtitleLang, setSubtitleLang] = useState<string | null>(null);
+@@ -510,13 +510,29 @@ const SettingsApplication = () => {
+               </div>
+               <div className="settings-box-wrapper">
+                 <div>
+-                  <p>Embed metadata</p>
++                  <label htmlFor="embed-metadata">Embed metadata</label>
++                  <p id="embed-metadata-help">
++                    Simple embeds title, artist, description and thumbnail at download time only.
++                    Refreshes leave existing files untouched. Full also embeds archive data and
++                    updates files during refresh.
++                  </p>
+                 </div>
+-                <ToggleConfig
+-                  name="downloads.add_metadata"
+-                  value={embedMetadata}
+-                  updateCallback={handleUpdateConfig}
+-                />
++                <select
++                  id="embed-metadata"
++                  aria-describedby="embed-metadata-help"
++                  value={String(embedMetadata)}
++                  onChange={event => {
++                    const value = event.target.value;
++                    handleUpdateConfig(
++                      'downloads.add_metadata',
++                      value === 'simple' ? 'simple' : value === 'true',
++                    );
++                  }}
++                >
++                  <option value="false">Off</option>
++                  <option value="true">Full</option>
++                  <option value="simple">Simple (download only)</option>
++                </select>
+               </div>
+             </div>
+             <div className="info-box-item">
+-- 
+2.54.0 (Apple Git-157)
