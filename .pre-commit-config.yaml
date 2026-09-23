@@ -1,4 +1,4 @@
-default_install_hook_types: [pre-commit, pre-push]
+default_install_hook_types: [pre-commit]
 default_stages: [pre-commit]
 
 repos:
@@ -48,14 +48,5 @@ repos:
       - id: prettier
         entry: npm run --prefix ./frontend format
         pass_filenames: false
-  - repo: local
-    hooks:
-      - id: check-pushed-version
-        name: Check pushed TA version
-        entry: ./.github/check_pushed_version.py
-        language: python
-        pass_filenames: false
-        always_run: true
-        stages: [pre-push]
 
 exclude: '.*(\.svg|/migrations/).*'
