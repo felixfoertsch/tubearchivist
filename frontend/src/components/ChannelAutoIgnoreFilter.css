@@ -1,0 +1,11 @@
+.channel-auto-ignore-filter textarea {
+  box-sizing: border-box;
+  display: block;
+  min-height: 6em;
+  padding: 5px;
+  resize: vertical;
+  border: solid 1px var(--main-font);
+  border-radius: 0;
+  color: var(--main-bg);
+  background-color: var(--accent-font-light);
+}
