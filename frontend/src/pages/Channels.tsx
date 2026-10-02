@@ -19,6 +19,7 @@ import { ApiResponseType } from '../functions/APIClient';
 import { ViewStylesEnum, ViewStylesType } from '../configuration/constants/ViewStyle';
 
 type ChannelOverwritesType = {
+  auto_ignore_filter?: string | null;
   download_format: string | null;
   autodelete_days: number | null;
   index_playlists: boolean | null;
