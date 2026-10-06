@@ -1,0 +1,481 @@
+From 301b24e5e3dcbf66e6a6ec7f1e591c08d1fffc04 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Felix=20F=C3=B6rtsch?= <mail@felixfoertsch.de>
+Date: Fri, 2 Oct 2026 14:49:34 +0200
+Subject: [PATCH] feat: add channel-title filtering
+
+Add an admin-only auto-ignore regular-expression filter to channel
+settings. Validate and persist channel-specific patterns and reload them
+before each queued download. Move matching videos to ignored without
+failing the queue or changing archived videos.
+
+Include the channel editor and regression tests for matching, validation,
+isolation, persistence, settings reloads and queue continuation.
+---
+ backend/appsettings/index_mapping.json        |   8 ++
+ backend/channel/serializers.py                |  20 ++++
+ backend/channel/src/index.py                  |   1 +
+ backend/channel/tests/test_auto_ignore.py     |  35 ++++++
+ backend/download/src/yt_dlp_handler.py        |  30 +++++
+ .../tests/test_src/test_auto_ignore.py        | 105 ++++++++++++++++++
+ .../components/ChannelAutoIgnoreFilter.css    |  11 ++
+ .../components/ChannelAutoIgnoreFilter.tsx    |  92 +++++++++++++++
+ frontend/src/pages/ChannelAbout.tsx           |   8 ++
+ frontend/src/pages/Channels.tsx               |   1 +
+ 10 files changed, 311 insertions(+)
+ create mode 100644 backend/channel/tests/test_auto_ignore.py
+ create mode 100644 backend/download/tests/test_src/test_auto_ignore.py
+ create mode 100644 frontend/src/components/ChannelAutoIgnoreFilter.css
+ create mode 100644 frontend/src/components/ChannelAutoIgnoreFilter.tsx
+
+diff --git a/backend/appsettings/index_mapping.json b/backend/appsettings/index_mapping.json
+index 79c257bf..c088f15b 100644
+--- a/backend/appsettings/index_mapping.json
++++ b/backend/appsettings/index_mapping.json
+@@ -52,6 +52,10 @@
+                 },
+                 "channel_overwrites": {
+                     "properties": {
++                        "auto_ignore_filter": {
++                            "type": "keyword",
++                            "index": false
++                        },
+                         "download_format": {
+                             "type": "text"
+                         },
+@@ -167,6 +171,10 @@
+                         },
+                         "channel_overwrites": {
+                             "properties": {
++                                "auto_ignore_filter": {
++                                    "type": "keyword",
++                                    "index": false
++                                },
+                                 "download_format": {
+                                     "type": "text"
+                                 },
+diff --git a/backend/channel/serializers.py b/backend/channel/serializers.py
+index d2dc4184..66c72a43 100644
+--- a/backend/channel/serializers.py
++++ b/backend/channel/serializers.py
+@@ -2,6 +2,8 @@
+ 
+ # pylint: disable=abstract-method
+ 
++import re
++
+ from common.serializers import PaginationSerializer, ValidateUnknownFieldsMixin
+ from rest_framework import serializers
+ from video.src.constants import VideoTypeEnum
+@@ -12,6 +14,12 @@ class ChannelOverwriteSerializer(
+ ):
+     """serialize channel overwrites"""
+ 
++    auto_ignore_filter = serializers.CharField(
++        required=False,
++        allow_null=True,
++        allow_blank=True,
++        trim_whitespace=False,
++    )
+     download_format = serializers.CharField(required=False, allow_null=True)
+     autodelete_days = serializers.IntegerField(required=False, allow_null=True)
+     index_playlists = serializers.BooleanField(required=False, allow_null=True)
+@@ -28,6 +36,18 @@ class ChannelOverwriteSerializer(
+         required=False, allow_null=True
+     )
+ 
++    def validate_auto_ignore_filter(self, value):
++        """reject invalid title filters before saving channel settings"""
++        if value:
++            try:
++                re.compile(value)
++            except re.error as err:
++                raise serializers.ValidationError(
++                    f"Invalid regular expression: {err}"
++                ) from err
++
++        return value
++
+ 
+ class ChannelSerializer(serializers.Serializer):
+     """serialize channel"""
+diff --git a/backend/channel/src/index.py b/backend/channel/src/index.py
+index 390f9023..71f4793d 100644
+--- a/backend/channel/src/index.py
++++ b/backend/channel/src/index.py
+@@ -265,6 +265,7 @@ class YoutubeChannel(YouTubeItem):
+     def set_overwrites(self, overwrites):
+         """set per channel overwrites"""
+         valid_keys = [
++            "auto_ignore_filter",
+             "download_format",
+             "autodelete_days",
+             "index_playlists",
+diff --git a/backend/channel/tests/test_auto_ignore.py b/backend/channel/tests/test_auto_ignore.py
+new file mode 100644
+index 00000000..35d6d635
+--- /dev/null
++++ b/backend/channel/tests/test_auto_ignore.py
+@@ -0,0 +1,35 @@
++"""validation and persistence of channel title filters"""
++
++import pytest
++from channel.serializers import ChannelOverwriteSerializer
++from channel.src.index import YoutubeChannel
++from rest_framework.serializers import ValidationError
++
++
++@pytest.mark.parametrize(
++    "pattern",
++    [None, "", "PODCAST: The Joy of Why", "(?i)podcast", " podcast "],
++)
++def test_valid_filters_are_preserved(pattern):
++    serializer = ChannelOverwriteSerializer()
++    assert serializer.validate_auto_ignore_filter(pattern) == pattern
++    field = serializer.fields["auto_ignore_filter"]
++    assert field.run_validation(pattern) == pattern
++
++
++@pytest.mark.parametrize("pattern", ["[", "(", "*", "(?invalid)"])
++def test_invalid_filters_are_rejected(pattern):
++    with pytest.raises(ValidationError, match="Invalid regular expression"):
++        ChannelOverwriteSerializer().validate_auto_ignore_filter(pattern)
++
++
++def test_setting_and_reset_preserve_other_overwrites():
++    channel = object.__new__(YoutubeChannel)
++    channel.json_data = {"channel_overwrites": {"download_format": "best"}}
++    channel.set_overwrites({"auto_ignore_filter": "podcast"})
++    assert channel.get_overwrites() == {
++        "download_format": "best",
++        "auto_ignore_filter": "podcast",
++    }
++    channel.set_overwrites({"auto_ignore_filter": None})
++    assert channel.get_overwrites() == {"download_format": "best"}
+diff --git a/backend/download/src/yt_dlp_handler.py b/backend/download/src/yt_dlp_handler.py
+index 768ef643..3dd98123 100644
+--- a/backend/download/src/yt_dlp_handler.py
++++ b/backend/download/src/yt_dlp_handler.py
+@@ -7,6 +7,7 @@ functionality:
+ """
+ 
+ import os
++import re
+ import shutil
+ from datetime import datetime
+ 
+@@ -23,6 +24,7 @@ from common.src.helper import (
+ from common.src.ta_redis import RedisQueue
+ from common.src.urlparser import ParsedURLType
+ from download.src.queue import PendingList
++from download.src.queue_interact import PendingInteract
+ from download.src.yt_dlp_base import YtWrap
+ from playlist.src.index import YoutubePlaylist
+ from video.src.comments import CommentList
+@@ -65,6 +67,9 @@ class VideoDownloader(DownloaderBase):
+                 self._reset_auto()
+                 break
+ 
++            if self._auto_ignore(video_data):
++                continue
++
+             if downloaded > 0:
+                 rand_sleep(self.config)
+ 
+@@ -94,6 +99,31 @@ class VideoDownloader(DownloaderBase):
+ 
+         return downloaded, failed
+ 
++    def _auto_ignore(self, video_data) -> bool:
++        """check current channel settings before downloading a queued video"""
++        channel = YoutubeChannel(video_data["channel_id"])
++        channel.get_from_es()
++        if not channel.json_data:
++            return False
++
++        pattern = channel.get_overwrites().get("auto_ignore_filter")
++        title = video_data.get("title")
++        if not pattern or not title:
++            return False
++
++        try:
++            if re.search(pattern, title) is None:
++                return False
++        except re.error as err:
++            print(f"{channel.youtube_id}: invalid auto-ignore filter: {err}")
++            return False
++
++        youtube_id = video_data["youtube_id"]
++        PendingInteract(youtube_id=youtube_id, status="ignore").update_status()
++        self._notify(video_data, "Auto-ignored by channel title filter")
++        print(f"{youtube_id}: auto-ignored by channel title filter")
++        return True
++
+     def _notify(self, video_data, message, progress=False):
+         """send progress notification to task"""
+         if not self.task:
+diff --git a/backend/download/tests/test_src/test_auto_ignore.py b/backend/download/tests/test_src/test_auto_ignore.py
+new file mode 100644
+index 00000000..641c6f9c
+--- /dev/null
++++ b/backend/download/tests/test_src/test_auto_ignore.py
+@@ -0,0 +1,105 @@
++"""channel title filters in the download queue"""
++
++from unittest.mock import Mock, patch
++
++import pytest
++from download.src.yt_dlp_handler import VideoDownloader
++
++MODULE = "download.src.yt_dlp_handler"
++TITLE = "PODCAST: The Joy of Why"
++VIDEO = {
++    "youtube_id": "podcast-id",
++    "channel_id": "quanta-id",
++    "title": f"New episode | {TITLE}",
++    "vid_type": "videos",
++}
++
++
++@pytest.mark.parametrize(
++    "pattern,title,expected",
++    [
++        (TITLE, VIDEO["title"], True),
++        (TITLE, "A mathematics video", False),
++        (f"^{TITLE}", VIDEO["title"], False),
++        (f"(?i){TITLE}", TITLE.lower(), True),
++        (TITLE, TITLE.lower(), False),
++        ("", TITLE, False),
++        (None, TITLE, False),
++        ("[", TITLE, False),
++        (".*", None, False),
++    ],
++)
++def test_auto_ignore_matches(pattern, title, expected):
++    downloader = object.__new__(VideoDownloader)
++    downloader._notify = Mock()
++    with (
++        patch(f"{MODULE}.YoutubeChannel") as channel,
++        patch(f"{MODULE}.PendingInteract") as pending,
++    ):
++        channel.return_value.get_overwrites.return_value = {
++            "auto_ignore_filter": pattern
++        }
++        result = downloader._auto_ignore({**VIDEO, "title": title})
++        assert result is expected
++        channel.assert_called_once_with(VIDEO["channel_id"])
++        channel.return_value.get_from_es.assert_called_once_with()
++        if expected:
++            pending.assert_called_once_with(
++                youtube_id=VIDEO["youtube_id"], status="ignore"
++            )
++            pending.return_value.update_status.assert_called_once_with()
++        else:
++            pending.assert_not_called()
++
++
++def test_filter_is_reloaded_and_missing_channels_are_allowed():
++    downloader = object.__new__(VideoDownloader)
++    downloader._notify = Mock()
++    with (
++        patch(f"{MODULE}.YoutubeChannel") as channel,
++        patch(f"{MODULE}.PendingInteract"),
++    ):
++        channel.return_value.get_overwrites.side_effect = [
++            {},
++            {"auto_ignore_filter": TITLE},
++        ]
++        assert not downloader._auto_ignore(VIDEO)
++        assert downloader._auto_ignore(VIDEO)
++        channel.return_value.json_data = False
++        assert not downloader._auto_ignore(VIDEO)
++        assert channel.return_value.get_from_es.call_count == 3
++
++
++@pytest.mark.parametrize("auto_only", [False, True])
++def test_ignored_video_is_skipped_without_failing_queue(auto_only):
++    downloader = object.__new__(VideoDownloader)
++    downloader.task = Mock()
++    downloader.task.is_stopped.return_value = False
++    downloader._reset_auto = Mock()
++    downloader._notify = Mock()
++    downloader._dl_single_vid = Mock(return_value=True)
++    downloader.move_to_archive = Mock()
++    downloader._delete_from_pending = Mock()
++    regular = {**VIDEO, "youtube_id": "regular-id", "channel_id": "other-id"}
++    downloader._get_next = Mock(side_effect=[VIDEO, regular, False])
++
++    with (
++        patch(f"{MODULE}.YoutubeChannel") as channel,
++        patch(f"{MODULE}.PendingInteract") as pending,
++        patch(f"{MODULE}.index_new_video"),
++        patch(f"{MODULE}.RedisQueue"),
++        patch(f"{MODULE}.DownloadPostProcess"),
++    ):
++        channel.return_value.get_overwrites.side_effect = [
++            {"auto_ignore_filter": TITLE},
++            {},
++        ]
++        assert downloader.run_queue(auto_only=auto_only) == (1, 0)
++        pending.assert_called_once_with(
++            youtube_id=VIDEO["youtube_id"], status="ignore"
++        )
++        downloader._dl_single_vid.assert_called_once_with(
++            "regular-id", "other-id"
++        )
++        downloader._delete_from_pending.assert_called_once_with("regular-id")
++        downloader.move_to_archive.assert_called_once()
+diff --git a/frontend/src/components/ChannelAutoIgnoreFilter.css b/frontend/src/components/ChannelAutoIgnoreFilter.css
+new file mode 100644
+index 00000000..209530f7
+--- /dev/null
++++ b/frontend/src/components/ChannelAutoIgnoreFilter.css
+@@ -0,0 +1,11 @@
++.channel-auto-ignore-filter textarea {
++  box-sizing: border-box;
++  display: block;
++  min-height: 6em;
++  padding: 5px;
++  resize: vertical;
++  border: solid 1px var(--main-font);
++  border-radius: 0;
++  color: var(--main-bg);
++  background-color: var(--accent-font-light);
++}
+diff --git a/frontend/src/components/ChannelAutoIgnoreFilter.tsx b/frontend/src/components/ChannelAutoIgnoreFilter.tsx
+new file mode 100644
+index 00000000..c803d44b
+--- /dev/null
++++ b/frontend/src/components/ChannelAutoIgnoreFilter.tsx
+@@ -0,0 +1,92 @@
++import { useState } from 'react';
++import updateChannelOverwrites from '../api/actions/updateChannelOverwrite';
++import './ChannelAutoIgnoreFilter.css';
++
++type Props = {
++  channelId: string;
++  initialValue?: string | null;
++};
++
++const ChannelAutoIgnoreFilter = ({ channelId, initialValue }: Props) => {
++  const [value, setValue] = useState(initialValue ?? '');
++  const [saving, setSaving] = useState(false);
++  const [saved, setSaved] = useState(false);
++  const [error, setError] = useState('');
++
++  const save = async () => {
++    setSaving(true);
++    setSaved(false);
++    setError('');
++    try {
++      const result = await updateChannelOverwrites(channelId, 'auto_ignore_filter', value || null);
++      if (result.status !== 200 || result.error) {
++        throw new Error('Save failed');
++      }
++      setSaved(true);
++    } catch {
++      setError('Could not save filter. Check the Python regular expression and try again.');
++    } finally {
++      setSaving(false);
++    }
++  };
++
++  return (
++    <div className="info-box">
++      <div className="info-box-item">
++        <h2>Channel Auto-Ignore Filter</h2>
++        <p>
++          Matching titles are ignored before download.{' '}
++          <a
++            href="https://docs.python.org/3/library/re.html"
++            target="_blank"
++            rel="noopener noreferrer"
++          >
++            Use a Python regular expression.
++          </a>
++        </p>
++        <p>Leave blank to disable. Already downloaded videos are not affected.</p>
++        <form
++          className="settings-box-wrapper channel-auto-ignore-filter"
++          onSubmit={event => {
++            event.preventDefault();
++            save();
++          }}
++        >
++          <div>
++            <label htmlFor="auto_ignore_filter">Title regex</label>
++          </div>
++          <div>
++            <textarea
++              id="auto_ignore_filter"
++              name="auto_ignore_filter"
++              rows={6}
++              value={value}
++              placeholder={String.raw`(?ix)\b(?:
++    (?:mini)?boat\w* | fish\w* | navy | wave\w*
++  | whaler | bayliner | zodiac | seadoo | rhib
++  | outboard | bf90 | bathtub | landing\s+craft
++  | spear\w* | prawns? | cabezon
++)\b`}
++              spellCheck={false}
++              disabled={saving}
++              onChange={event => {
++                setValue(event.target.value);
++                setSaved(false);
++                setError('');
++              }}
++            />
++            <div className="button-box">
++              <button type="submit" disabled={saving}>
++                {saving ? 'Saving...' : 'Save'}
++              </button>
++              {saved && <span role="status">Saved</span>}
++            </div>
++            {error && <p role="alert">{error}</p>}
++          </div>
++        </form>
++      </div>
++    </div>
++  );
++};
++
++export default ChannelAutoIgnoreFilter;
+diff --git a/frontend/src/pages/ChannelAbout.tsx b/frontend/src/pages/ChannelAbout.tsx
+index 1e8f3c59..f01b40b7 100644
+--- a/frontend/src/pages/ChannelAbout.tsx
++++ b/frontend/src/pages/ChannelAbout.tsx
+@@ -1,5 +1,6 @@
+ import { useNavigate, useOutletContext, useParams } from 'react-router-dom';
+ import ChannelOverview from '../components/ChannelOverview';
++import ChannelAutoIgnoreFilter from '../components/ChannelAutoIgnoreFilter';
+ import { useEffect, useState } from 'react';
+ import loadChannelById, { ChannelResponseType } from '../api/loader/loadChannelById';
+ import Linkify from '../components/Linkify';
+@@ -386,6 +387,13 @@ const ChannelAbout = () => {
+             </div>
+           </div>
+         )}
++        {isAdmin && (
++          <ChannelAutoIgnoreFilter
++            key={channel.channel_id}
++            channelId={channel.channel_id}
++            initialValue={channel.channel_overwrites?.auto_ignore_filter}
++          />
++        )}
+       </div>
+ 
+       <PaginationDummy />
+diff --git a/frontend/src/pages/Channels.tsx b/frontend/src/pages/Channels.tsx
+index e5b7212d..37fd8eb1 100644
+--- a/frontend/src/pages/Channels.tsx
++++ b/frontend/src/pages/Channels.tsx
+@@ -19,6 +19,7 @@ import { ApiResponseType } from '../functions/APIClient';
+ import { ViewStylesEnum, ViewStylesType } from '../configuration/constants/ViewStyle';
+ 
+ type ChannelOverwritesType = {
++  auto_ignore_filter?: string | null;
+   download_format: string | null;
+   autodelete_days: number | null;
+   index_playlists: boolean | null;
+-- 
+2.54.0 (Apple Git-157)
+
