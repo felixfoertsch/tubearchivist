@@ -1,3 +1,16 @@
+This fork follows upstream [Tube Archivist](https://github.com/tubearchivist/tubearchivist) and applies patches below in order. `automation` owns patches and workflows; generated `main` contains upstream source plus these patches. Nightly builds follow upstream default branch; stable builds follow upstream releases.
+
+# Patched Tube Archivist
+
+Applied patches, oldest first:
+
+1. [0001-remove-upstream-ai-policy.patch](https://github.com/felixfoertsch/tubearchivist/blob/automation/.automation/patches/0001-remove-upstream-ai-policy.patch)
+2. [0002-fork-runtime-defaults.patch](https://github.com/felixfoertsch/tubearchivist/blob/automation/.automation/patches/0002-fork-runtime-defaults.patch)
+3. [0003-channel-title-filtering.patch](https://github.com/felixfoertsch/tubearchivist/blob/automation/.automation/patches/0003-channel-title-filtering.patch)
+4. [0004-simple-download-only-metadata-embedding.patch](https://github.com/felixfoertsch/tubearchivist/blob/automation/.automation/patches/0004-simple-download-only-metadata-embedding.patch)
+
+---
+
 ![Tube Archivist](assets/tube-archivist-front.jpg?raw=true "Tube Archivist Banner")
 [*more screenshots and video*](SHOWCASE.MD)
 

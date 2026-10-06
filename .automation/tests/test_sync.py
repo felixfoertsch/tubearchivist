@@ -46,7 +46,9 @@ class SyncTests(unittest.TestCase):
         self.assertFalse((self.root / ".automation").exists())
         self.assertFalse((self.root / "AGENTS.md").exists())
         readme = (self.root / "README.md").read_text(encoding="utf-8")
-        self.assertIn("0001-remove-upstream-ai-policy.patch", readme)
+        self.assertTrue(readme.startswith("This fork follows upstream [Tube Archivist]"))
+        self.assertEqual(readme.split("\n---\n\n", 1)[1], (self.upstream / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("1. [0001-remove-upstream-ai-policy.patch]", readme)
         self.assertIn("https://github.com/felixfoertsch/tubearchivist/blob/automation/.automation/patches/", readme)
         self.assertIn("0004-simple-download-only-metadata-embedding.patch", readme)
 

@@ -65,7 +65,7 @@ def sync(root: Path, upstream_url: str, upstream_ref: str) -> dict[str, str]:
                 patches.append(name)
             readme = candidate / "README.md"
             upstream_readme = readme.read_text(encoding="utf-8") if readme.exists() else ""
-            readme.write_text("# Patched Tube Archivist\n\nUnofficial fork image. Applied patches, oldest first:\n\n" + "".join(f"- [{name}](https://github.com/felixfoertsch/tubearchivist/blob/automation/.automation/patches/{name})\n" for name in patches) + "\n---\n\n" + upstream_readme, encoding="utf-8")
+            readme.write_text("This fork follows upstream [Tube Archivist](https://github.com/tubearchivist/tubearchivist) and applies patches below in order. `automation` owns patches and workflows; generated `main` contains upstream source plus these patches. Nightly builds follow upstream default branch; stable builds follow upstream releases.\n\n# Patched Tube Archivist\n\nUnofficial fork image. Applied patches, oldest first:\n\n" + "".join(f"{index}. [{name}](https://github.com/felixfoertsch/tubearchivist/blob/automation/.automation/patches/{name})\n" for index, name in enumerate(patches, 1)) + "\n---\n\n" + upstream_readme, encoding="utf-8")
             git(candidate, "add", "README.md")
             commit(candidate, "Document ordered fork patches", timestamp)
             git(candidate, "rm", "-r", ".automation")
