@@ -53,6 +53,9 @@ class SyncTests(unittest.TestCase):
         self.assertIn("[0001]", readme.splitlines()[0])
         self.assertFalse((self.root / ".github/workflows").exists())
         self.assertIn("0004-simple-download-only-metadata-embedding.patch", readme)
+        self.assertEqual([p.name for p in self.root.iterdir() if p.is_file() and p.name.lower().startswith("readme")], ["README.md"])
+        for name in ("backend/README.md", "frontend/README.md"):
+            self.assertEqual((self.root / name).read_bytes(), (self.upstream / name).read_bytes())
 
     def test_absent_policy_files_are_accepted(self):
         patch = (self.root / ".automation/patches/0001-remove-upstream-ai-policy.patch").read_text(encoding="utf-8")

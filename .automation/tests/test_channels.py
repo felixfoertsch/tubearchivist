@@ -9,6 +9,13 @@ import channels
 
 
 class ChannelTests(unittest.TestCase):
+    def test_build_tooling_uses_node24_actions(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / ".github/workflows/downstream.yml").read_text()
+        for action in ("actions/setup-node@v6", "actions/setup-python@v6", "actions/upload-artifact@v6", "actions/download-artifact@v7", "docker/build-push-action@v7", "docker/setup-buildx-action@v4", "docker/setup-qemu-action@v4"):
+            self.assertIn(action, workflow)
+        self.assertIn("node-version: '24.21.0'", workflow)
+
     def test_aliases_are_channel_isolated(self):
         self.assertEqual(channels.aliases("stable", "0.5.12"), ["latest", "stable"])
         self.assertEqual(channels.aliases("nightly", "nightly"), ["nightly", "edge", "develop"])
@@ -26,7 +33,7 @@ class ChannelTests(unittest.TestCase):
         self.assertNotIn('persist-credentials: true', workflow)
         self.assertIn('Independently reconstruct expected source', workflow)
         self.assertIn('--preserve-digests', workflow)
-        self.assertIn('actions/download-artifact@v4', workflow)
+        self.assertIn('actions/download-artifact@v7', workflow)
         build = workflow.split('  publish:', 1)[0]
         self.assertNotIn('contents: write', build)
         self.assertNotIn('packages: write', build)

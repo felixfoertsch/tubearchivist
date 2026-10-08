@@ -11,6 +11,9 @@ unofficial `ghcr.io/felixfoertsch/tubearchivist` channels from official upstream
   multi-architecture candidates to `nightly`, `edge`, `develop`, and isolated
   `nightly-<latest-stable-tag>-YYYY.MM.DD.N` identities. Version-only image tags stay untouched.
 
+Build tooling pins Node.js 24.21.0 LTS; GitHub Actions use native Node.js 24 runtimes.
+Packaged upstream application runtimes remain unchanged.
+
 Read-only build jobs export OCI archives without persisted Git credentials.
 Separate publication jobs check out exact workflow revision, reconstruct source
 independently, verify artifact provenance and both image revisions, then publish.
