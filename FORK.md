@@ -1,13 +1,20 @@
 # Fork automation
 
-`automation` owns workflows, ordered patch files, and tests. It builds two
+`patch-queue` owns workflows, ordered patch files, and tests. It builds two
 unofficial `ghcr.io/felixfoertsch/tubearchivist` channels from official upstream:
 
 - Stable uses upstream GitHub Releases `latest`, then every patch in
   `.automation/series`. It promotes only validated multi-architecture candidates
-  to `latest`, `stable`, and version aliases.
+  to `latest`, `stable`, and immutable `<upstream-tag>-YYYY.MM.DD.N` identities.
+  Dates use Europe/Berlin; suffixes advance past existing source tags.
 - Nightly uses upstream `develop`, then same patches. It promotes only validated
-  multi-architecture candidates to `nightly`, `edge`, and `develop`.
+  multi-architecture candidates to `nightly`, `edge`, `develop`, and isolated
+  `nightly-<latest-stable-tag>-YYYY.MM.DD.N` identities. Version-only image tags stay untouched.
+
+Read-only build jobs export OCI archives without persisted Git credentials.
+Separate publication jobs check out exact workflow revision, reconstruct source
+independently, verify artifact provenance and both image revisions, then publish.
+Downloaded artifacts contain data only; publication never executes their code.
 
 Automation rebuilds `main` only from current upstream `develop` plus all patches.
 Generated `main` contains no `.github/workflows` or `.automation`; it has no

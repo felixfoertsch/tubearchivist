@@ -23,6 +23,17 @@ def commit(root: Path, message: str, timestamp: str) -> None:
         raise RuntimeError(result.stderr.strip())
 
 
+def fork_readme(upstream: str, patches: list[str]) -> str:
+    base = "https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/"
+    links = ", ".join(f"[{name[:4]}]({base}{name})" for name in patches)
+    return ("This fork follows upstream [Tube Archivist](https://github.com/tubearchivist/tubearchivist) "
+            f"plus ordered patches {links}. `patch-queue` owns patches and workflows; generated `main` "
+            "contains upstream source plus the full queue. Stable builds follow upstream releases; nightly builds follow `develop`.\n\n"
+            "# Patched Tube Archivist\n\nApplied patches, oldest first:\n\n"
+            + "".join(f"{index}. [{name}]({base}{name})\n" for index, name in enumerate(patches, 1))
+            + "\n---\n\n" + upstream)
+
+
 def sync(root: Path, upstream_url: str, upstream_ref: str) -> dict[str, str]:
     if git(root, "status", "--porcelain"):
         raise RuntimeError("Refusing dirty checkout.")
@@ -39,7 +50,11 @@ def sync(root: Path, upstream_url: str, upstream_ref: str) -> dict[str, str]:
             git(candidate, "add", "--all")
             commit(candidate, "Maintain fork automation", timestamp)
             patches: list[str] = []
-            for name in (candidate / ".automation/series").read_text(encoding="utf-8").splitlines():
+            series = (candidate / ".automation/series").read_text(encoding="utf-8").splitlines()
+            ordered = [name.strip() for name in series if name.strip() and not name.strip().startswith("#")]
+            if not ordered or ordered[0] != "0001-remove-upstream-ai-policy.patch" or len(set(ordered)) != len(ordered):
+                raise RuntimeError("Queue must start with accepted policy removal and contain no duplicates.")
+            for name in series:
                 name = name.strip()
                 if not name or name.startswith("#"):
                     continue
@@ -58,14 +73,15 @@ def sync(root: Path, upstream_url: str, upstream_ref: str) -> dict[str, str]:
                         continue
                     reverse = subprocess.run(["git", "-C", str(candidate), "apply", "--index", "--reverse", "--check", str(patch)], text=True, capture_output=True)
                     if reverse.returncode == 0:
-                        raise RuntimeError(f"Patch already applied upstream: {name}")
+                        patches.append(name)
+                        continue
                     raise RuntimeError(f"Patch no longer applies: {name}\n{result.stderr.strip()}")
                 git(candidate, "apply", "--index", "--whitespace=error-all", str(patch))
                 commit(candidate, f"Apply fork patch: {name}", timestamp)
                 patches.append(name)
             readme = candidate / "README.md"
             upstream_readme = readme.read_text(encoding="utf-8") if readme.exists() else ""
-            readme.write_text("This fork follows upstream [Tube Archivist](https://github.com/tubearchivist/tubearchivist) and applies patches below in order. `automation` owns patches and workflows; generated `main` contains upstream source plus these patches. Nightly builds follow upstream default branch; stable builds follow upstream releases.\n\n# Patched Tube Archivist\n\nUnofficial fork image. Applied patches, oldest first:\n\n" + "".join(f"{index}. [{name}](https://github.com/felixfoertsch/tubearchivist/blob/automation/.automation/patches/{name})\n" for index, name in enumerate(patches, 1)) + "\n---\n\n" + upstream_readme, encoding="utf-8")
+            readme.write_text(fork_readme(upstream_readme, patches), encoding="utf-8")
             git(candidate, "add", "README.md")
             commit(candidate, "Document ordered fork patches", timestamp)
             git(candidate, "rm", "-r", ".automation")

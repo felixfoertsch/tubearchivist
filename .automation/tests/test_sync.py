@@ -49,7 +49,9 @@ class SyncTests(unittest.TestCase):
         self.assertTrue(readme.startswith("This fork follows upstream [Tube Archivist]"))
         self.assertEqual(readme.split("\n---\n\n", 1)[1], (self.upstream / "README.md").read_text(encoding="utf-8"))
         self.assertIn("1. [0001-remove-upstream-ai-policy.patch]", readme)
-        self.assertIn("https://github.com/felixfoertsch/tubearchivist/blob/automation/.automation/patches/", readme)
+        self.assertIn("https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/", readme)
+        self.assertIn("[0001]", readme.splitlines()[0])
+        self.assertFalse((self.root / ".github/workflows").exists())
         self.assertIn("0004-simple-download-only-metadata-embedding.patch", readme)
 
     def test_absent_policy_files_are_accepted(self):
@@ -62,6 +64,24 @@ class SyncTests(unittest.TestCase):
         result = self.sync()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.root / "AGENTS.md").exists())
+
+    def test_replay_is_deterministic(self):
+        queue = self.git_run(self.root, "rev-parse", "HEAD").stdout.strip()
+        first = self.sync()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        source = self.git_run(self.root, "rev-parse", "HEAD").stdout
+        self.git_run(self.root, "reset", "--hard", queue)
+        second = self.sync()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(source, self.git_run(self.root, "rev-parse", "HEAD").stdout)
+
+    def test_exact_reverse_absorption_is_accepted(self):
+        patch = self.root / ".automation/patches/0002-fork-runtime-defaults.patch"
+        self.git_run(self.upstream, "apply", "--index", str(patch))
+        self.git_run(self.upstream, "commit", "-m", "absorbed")
+        result = self.sync()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("0002-fork-runtime-defaults.patch", (self.root / "README.md").read_text())
 
     def test_conflicting_patch_fails(self):
         (self.upstream / "backend/appsettings").mkdir(parents=True, exist_ok=True)
