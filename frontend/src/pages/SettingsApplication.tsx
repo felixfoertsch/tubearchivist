@@ -55,7 +55,7 @@ const SettingsApplication = () => {
   const [downloadsFormat, setDownloadsFormat] = useState<string | null>(null);
   const [downloadsFormatSort, setDownloadsFormatSort] = useState<string | null>(null);
   const [downloadsExtractorLang, setDownloadsExtractorLang] = useState<string | null>(null);
-  const [embedMetadata, setEmbedMetadata] = useState(false);
+  const [embedMetadata, setEmbedMetadata] = useState<boolean | 'simple'>(false);
 
   // Subtitles
   const [subtitleLang, setSubtitleLang] = useState<string | null>(null);
@@ -510,13 +510,29 @@ const SettingsApplication = () => {
               </div>
               <div className="settings-box-wrapper">
                 <div>
-                  <p>Embed metadata</p>
+                  <label htmlFor="embed-metadata">Embed metadata</label>
+                  <p id="embed-metadata-help">
+                    Simple embeds title, artist, description and thumbnail at download time only.
+                    Refreshes leave existing files untouched. Full also embeds archive data and
+                    updates files during refresh.
+                  </p>
                 </div>
-                <ToggleConfig
-                  name="downloads.add_metadata"
-                  value={embedMetadata}
-                  updateCallback={handleUpdateConfig}
-                />
+                <select
+                  id="embed-metadata"
+                  aria-describedby="embed-metadata-help"
+                  value={String(embedMetadata)}
+                  onChange={event => {
+                    const value = event.target.value;
+                    handleUpdateConfig(
+                      'downloads.add_metadata',
+                      value === 'simple' ? 'simple' : value === 'true',
+                    );
+                  }}
+                >
+                  <option value="false">Off</option>
+                  <option value="true">Full</option>
+                  <option value="simple">Simple (download only)</option>
+                </select>
               </div>
             </div>
             <div className="info-box-item">
