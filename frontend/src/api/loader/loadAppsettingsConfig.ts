@@ -15,7 +15,7 @@ export type AppSettingsConfigType = {
     autodelete_days: number | null;
     format: string | null;
     format_sort: string | null;
-    add_metadata: boolean;
+    add_metadata: boolean | 'simple';
     subtitle: string | null;
     subtitle_source: string | null;
     subtitle_index: boolean;
