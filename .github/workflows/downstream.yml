@@ -38,14 +38,33 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .automation/channels.py '${{ matrix.channel }}'
+      - name: Install read-only registry tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
       - name: Rebuild upstream plus patches
         id: source
-        run: python3 .automation/sync.py --upstream-ref '${{ steps.channel.outputs.ref }}'
+        run: |
+          cp .automation/publication.py "$RUNNER_TEMP/publication.py"
+          python3 .automation/sync.py --upstream-ref '${{ steps.channel.outputs.ref }}'
+      - name: Check complete unchanged publication
+        id: publication
+        env:
+          SOURCE: ${{ steps.source.outputs.source_sha }}
+          UPSTREAM: ${{ steps.source.outputs.upstream_sha }}
+          QUEUE: ${{ github.sha }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          args=()
+          if [ "$FORCE" = true ]; then args+=(--force); fi
+          python3 "$RUNNER_TEMP/publication.py" '${{ matrix.channel }}' 'ghcr.io/${{ github.repository }}' "$SOURCE" "$UPSTREAM" "$QUEUE" "${args[@]}"
       - name: Install system dependencies
+        if: steps.publication.outputs.skip != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc libldap2-dev libsasl2-dev libssl-dev
       - uses: actions/setup-python@v6
+        if: steps.publication.outputs.skip != 'true'
         with:
           python-version: '3.13'
           cache: pip
@@ -53,11 +72,13 @@ jobs:
             requirements-dev.txt
             backend/requirements.txt
       - uses: actions/setup-node@v6
+        if: steps.publication.outputs.skip != 'true'
         with:
           node-version: '24.21.0'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Validate rebuilt source
+        if: steps.publication.outputs.skip != 'true'
         run: |
           python -m pip install -r requirements-dev.txt
           npm ci --prefix frontend
@@ -66,8 +87,11 @@ jobs:
           npm run --prefix frontend build:deploy
           git diff --exit-code
       - uses: docker/setup-qemu-action@v4
+        if: steps.publication.outputs.skip != 'true'
       - uses: docker/setup-buildx-action@v4
+        if: steps.publication.outputs.skip != 'true'
       - name: Build read-only candidate
+        if: steps.publication.outputs.skip != 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -79,6 +103,7 @@ jobs:
             org.opencontainers.image.base.digest=${{ steps.source.outputs.upstream_sha }}
             de.felixfoertsch.patch-queue=${{ github.sha }}
       - name: Record artifact provenance
+        if: steps.publication.outputs.skip != 'true'
         env:
           SOURCE: ${{ steps.source.outputs.source_sha }}
           UPSTREAM: ${{ steps.source.outputs.upstream_sha }}
@@ -90,6 +115,7 @@ jobs:
           sha256sum candidate.tar > candidate.sha256
           jq -n --arg source "$SOURCE" --arg upstream "$UPSTREAM" --arg queue "$QUEUE" --arg ref "$REF" --arg tag "$TAG" '{source:$source,upstream:$upstream,queue:$queue,ref:$ref,tag:$tag}' > provenance.json
       - uses: actions/upload-artifact@v6
+        if: steps.publication.outputs.skip != 'true'
         with:
           name: candidate-${{ matrix.channel }}
           path: |
@@ -110,16 +136,13 @@ jobs:
     permissions:
       contents: write
       packages: write
+      actions: write
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/download-artifact@v7
-        with:
-          name: candidate-${{ matrix.channel }}
-          path: ${{ runner.temp }}/candidate
       - name: Install trusted publication tools
         run: |
           sudo apt-get update
@@ -141,7 +164,25 @@ jobs:
           git -C "$RUNNER_TEMP/source" checkout --detach "$QUEUE"
           cd "$RUNNER_TEMP/source"
           python3 "$GITHUB_WORKSPACE/.automation/sync.py" --upstream-ref '${{ steps.channel.outputs.ref }}'
+      - name: Check complete unchanged publication
+        id: publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE: ${{ steps.source.outputs.source_sha }}
+          UPSTREAM: ${{ steps.source.outputs.upstream_sha }}
+          QUEUE: ${{ github.sha }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          args=()
+          if [ "$FORCE" = true ]; then args+=(--force); fi
+          python3 .automation/publication.py '${{ matrix.channel }}' 'ghcr.io/${{ github.repository }}' "$SOURCE" "$UPSTREAM" "$QUEUE" --repair-missing-candidate "${args[@]}"
+      - uses: actions/download-artifact@v7
+        if: steps.publication.outputs.skip != 'true'
+        with:
+          name: candidate-${{ matrix.channel }}
+          path: ${{ runner.temp }}/candidate
       - name: Verify artifact provenance and revision
+        if: steps.publication.outputs.skip != 'true'
         env:
           SOURCE: ${{ steps.source.outputs.source_sha }}
           UPSTREAM: ${{ steps.source.outputs.upstream_sha }}
@@ -157,6 +198,7 @@ jobs:
               jq -e --arg source "$SOURCE" --arg upstream "$UPSTREAM" --arg queue "$QUEUE" --arg arch "$arch" '.Architecture == $arch and .Labels["org.opencontainers.image.revision"] == $source and .Labels["org.opencontainers.image.base.digest"] == $upstream and .Labels["de.felixfoertsch.patch-queue"] == $queue'
           done
       - name: Publish verified image and source
+        if: steps.publication.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           IMAGE: ghcr.io/${{ github.repository }}
