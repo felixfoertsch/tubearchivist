@@ -64,7 +64,9 @@ index 5004f932..7634ac48 100644
          """embed video artwork"""
          file_path = os.path.join(self.MEDIA_DIR, json_data["media_url"])
          if not os.path.exists(file_path):
-@@ -234,6 +234,10 @@ class ThumbManager(ThumbManagerBase):
+@@ -232,6 +232,10 @@ class ThumbManager(ThumbManagerBase):
+ 
+             video["covr"] = [
                  MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)
              ]
  
@@ -73,8 +75,6 @@ index 5004f932..7634ac48 100644
 +            return
 +
          channel_id = json_data["channel"]["channel_id"]
-         banner_path = os.path.join(
-             self.CHANNEL_DIR, f"{channel_id}_banner.jpg"
 diff --git a/backend/download/src/yt_dlp_handler.py b/backend/download/src/yt_dlp_handler.py
 index 3dd98123..ccb110e5 100644
 --- a/backend/download/src/yt_dlp_handler.py

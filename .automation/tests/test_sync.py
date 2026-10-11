@@ -57,6 +57,21 @@ class SyncTests(unittest.TestCase):
         for name in ("backend/README.md", "frontend/README.md"):
             self.assertEqual((self.root / name).read_bytes(), (self.upstream / name).read_bytes())
 
+    def test_metadata_patch_preserves_channel_art_path_helper(self):
+        thumbnails = self.upstream / "backend/download/src/thumbnails.py"
+        original = thumbnails.read_text(encoding="utf-8")
+        inline = '        banner_path = os.path.join(\n            self.CHANNEL_DIR, f"{channel_id}_banner.jpg"\n        )'
+        helper = '        banner_path = self.channel_art_path(channel_id, "banner")'
+        self.assertEqual(original.count(inline), 1)
+        thumbnails.write_text(original.replace(inline, helper), encoding="utf-8")
+        self.git_run(self.upstream, "add", ".")
+        self.git_run(self.upstream, "commit", "-m", "use channel artwork helper")
+        result = self.sync()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rebuilt = (self.root / "backend/download/src/thumbnails.py").read_text(encoding="utf-8")
+        self.assertIn(helper, rebuilt)
+        self.assertIn('        if simple:\n            video.save()\n            return\n\n        channel_id = json_data["channel"]["channel_id"]', rebuilt)
+
     def test_absent_policy_files_are_accepted(self):
         patch = (self.root / ".automation/patches/0001-remove-upstream-ai-policy.patch").read_text(encoding="utf-8")
         self.assertIn("AGENTS.md", patch)
