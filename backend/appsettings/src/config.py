@@ -34,7 +34,7 @@ class DownloadsConfigType(TypedDict):
     autodelete_days: int | None
     format: str | None
     format_sort: str | None
-    add_metadata: bool
+    add_metadata: bool | Literal["simple"]
     subtitle: str | None
     subtitle_source: Literal["user", "auto"] | None
     subtitle_index: bool
