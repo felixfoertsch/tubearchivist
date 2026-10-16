@@ -88,7 +88,7 @@ export type DownloadsType = {
   autodelete_days: boolean;
   format: boolean;
   format_sort: boolean;
-  add_metadata: boolean;
+  add_metadata: boolean | 'simple';
   subtitle: boolean;
   subtitle_source: boolean;
   subtitle_index: boolean;
