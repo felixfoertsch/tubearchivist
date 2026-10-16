@@ -165,15 +165,22 @@ class IndexPaginate:
         """get all results, add task and total for notifications"""
         self.get_pit()
         self.validate_data()
-        all_results = self.run_loop()
-        self.clean_pit()
-        return all_results
+        try:
+            return self.run_loop()
+        finally:
+            self.clean_pit()
 
     def get_pit(self):
         """get pit for index"""
         keep_alive = self.kwargs.get("pit_keep_alive", 15)
         path = f"{self.index_name}/_pit?keep_alive={keep_alive}m"
-        response, _ = ElasticWrap(path).post()
+        response, status = ElasticWrap(path).post()
+        if self.kwargs.get("strict") and (
+            status != 200
+            or response.get("_shards", {}).get("failed", 0)
+            or not response.get("id")
+        ):
+            raise ValueError("Incomplete index PIT")
         self.pit_id = response["id"]
 
     def validate_data(self):
@@ -199,7 +206,13 @@ class IndexPaginate:
             if timeout_overwrite := self.kwargs.get("timeout"):
                 get_kwargs.update({"timeout": timeout_overwrite})
 
-            response, _ = ElasticWrap("_search").get(**get_kwargs)
+            response, status = ElasticWrap("_search").get(**get_kwargs)
+            if self.kwargs.get("strict") and (
+                status != 200
+                or response.get("timed_out")
+                or response.get("_shards", {}).get("failed", 0)
+            ):
+                raise ValueError("Incomplete index search")
             all_hits = response["hits"]["hits"]
             if not all_hits:
                 break
