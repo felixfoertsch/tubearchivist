@@ -136,7 +136,7 @@ function sync_docker {
     fi
 
     echo "latest tags:"
-    git tag | sort -rV | head -n 5
+    git for-each-ref --exclude='refs/tags/archive/patch-queue/*' --format='%(refname:strip=2)' refs/tags | sort -rV | head -n 5
 
     printf "\ncreate new version:\n"
     read -r VERSION
@@ -146,7 +146,7 @@ function sync_docker {
 
     # create release tag
     echo "commits since last version:"
-    git log "$(git describe --tags --abbrev=0)"..HEAD --oneline
+    git log "$(git describe --tags --exclude='archive/patch-queue/*' --abbrev=0)"..HEAD --oneline
     git tag -a "$VERSION" -m "new release version $VERSION"
     git push origin "$VERSION"
 
@@ -171,7 +171,7 @@ function sync_docker_old {
     fi
 
     echo "latest tags:"
-    git tag | sort -rV | head -n 5
+    git for-each-ref --exclude='refs/tags/archive/patch-queue/*' --format='%(refname:strip=2)' refs/tags | sort -rV | head -n 5
 
     printf "\ncreate new version:\n"
     read -r VERSION
@@ -188,7 +188,7 @@ function sync_docker_old {
 
     # create release tag
     echo "commits since last version:"
-    git log "$(git describe --tags --abbrev=0)"..HEAD --oneline
+    git log "$(git describe --tags --exclude='archive/patch-queue/*' --abbrev=0)"..HEAD --oneline
     git tag -a "$VERSION" -m "new release version $VERSION"
     git push origin "$VERSION"
 
