@@ -1,0 +1,329 @@
+name: Patched Tube Archivist
+
+on:
+  push:
+    branches: [patch-queue]
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      expected_control:
+        description: Exact control revision expected by refresh continuation
+        type: string
+        default: ''
+      rebuild:
+        description: Rebuild even when publication is complete
+        type: boolean
+        default: true
+
+concurrency:
+  group: tubearchivist-downstream
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh-candidate:
+    if: github.repository == 'felixfoertsch/tubearchivist' && github.ref == 'refs/heads/patch-queue'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.refresh.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reject stale continuation
+        env:
+          EXPECTED: ${{ inputs.expected_control }}
+        run: test -z "$EXPECTED" || test "$EXPECTED" = "$GITHUB_SHA"
+      - run: python3 -B -m unittest discover -s .automation/tests -v
+      - id: refresh
+        run: python3 .automation/refresh.py prepare "$RUNNER_TEMP/refresh"
+      - uses: actions/upload-artifact@v6
+        if: steps.refresh.outputs.changed == 'true'
+        with:
+          name: control-refresh
+          path: ${{ runner.temp }}/refresh/refresh.json
+          retention-days: 2
+
+  refresh-promote:
+    needs: refresh-candidate
+    if: needs.refresh-candidate.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: control-refresh
+          path: ${{ runner.temp }}/untrusted
+      - name: Independently reconstruct with trusted old control
+        run: |
+          python3 .automation/refresh.py prepare "$RUNNER_TEMP/refresh"
+          cmp "$RUNNER_TEMP/untrusted/refresh.json" "$RUNNER_TEMP/refresh/refresh.json"
+      - name: Create recoverable backup
+        run: python3 .automation/refresh.py backup "$RUNNER_TEMP/backup"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: control-backup-${{ github.sha }}
+          path: ${{ runner.temp }}/backup/
+          retention-days: 90
+      - uses: actions/download-artifact@v7
+        with:
+          name: control-backup-${{ github.sha }}
+          path: ${{ runner.temp }}/downloaded-backup
+      - name: Verify uploaded backup and atomically promote
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REBUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.rebuild }}
+        run: |
+          cmp "$RUNNER_TEMP/backup/control.sha256" "$RUNNER_TEMP/downloaded-backup/control.sha256"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          args=()
+          if [ "$REBUILD" = true ]; then args+=(--force); fi
+          python3 .automation/refresh.py promote "$RUNNER_TEMP/refresh" --downloaded "$RUNNER_TEMP/downloaded-backup" "${args[@]}"
+
+  build:
+    needs: refresh-candidate
+    if: needs.refresh-candidate.outputs.changed == 'false'
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [stable, nightly]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test automation
+        run: python3 -B -m unittest discover -s .automation/tests -v
+      - name: Resolve official source
+        id: channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .automation/channels.py '${{ matrix.channel }}'
+      - name: Install read-only registry tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+      - name: Rebuild upstream plus patches
+        id: source
+        run: |
+          cp .automation/publication.py "$RUNNER_TEMP/publication.py"
+          python3 .automation/sync.py --upstream-ref '${{ steps.channel.outputs.ref }}'
+      - name: Check complete unchanged publication
+        id: publication
+        env:
+          SOURCE: ${{ steps.source.outputs.source_sha }}
+          UPSTREAM: ${{ steps.source.outputs.upstream_sha }}
+          QUEUE: ${{ github.sha }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.rebuild }}
+        run: |
+          args=()
+          if [ "$FORCE" = true ]; then args+=(--force); fi
+          python3 "$RUNNER_TEMP/publication.py" '${{ matrix.channel }}' 'ghcr.io/${{ github.repository }}' "$SOURCE" "$UPSTREAM" "$QUEUE" "${args[@]}"
+      - name: Install system dependencies
+        if: steps.publication.outputs.skip != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libldap2-dev libsasl2-dev libssl-dev
+      - uses: actions/setup-python@v6
+        if: steps.publication.outputs.skip != 'true'
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            backend/requirements.txt
+      - uses: actions/setup-node@v6
+        if: steps.publication.outputs.skip != 'true'
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Validate rebuilt source
+        if: steps.publication.outputs.skip != 'true'
+        run: |
+          python -m pip install -r requirements-dev.txt
+          npm ci --prefix frontend
+          node --test frontend/tests/channel-rolling-window.mjs
+          pre-commit run --all-files
+          pytest backend
+          npm run --prefix frontend build:deploy
+          git diff --exit-code
+      - uses: docker/setup-qemu-action@v4
+        if: steps.publication.outputs.skip != 'true'
+      - uses: docker/setup-buildx-action@v4
+        if: steps.publication.outputs.skip != 'true'
+      - name: Build read-only candidate
+        if: steps.publication.outputs.skip != 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          outputs: type=oci,dest=${{ runner.temp }}/candidate.tar
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.source_sha }}
+            org.opencontainers.image.base.digest=${{ steps.source.outputs.upstream_sha }}
+            de.felixfoertsch.patch-queue=${{ github.sha }}
+      - name: Record artifact provenance
+        if: steps.publication.outputs.skip != 'true'
+        env:
+          SOURCE: ${{ steps.source.outputs.source_sha }}
+          UPSTREAM: ${{ steps.source.outputs.upstream_sha }}
+          QUEUE: ${{ github.sha }}
+          REF: ${{ steps.channel.outputs.ref }}
+          TAG: ${{ steps.channel.outputs.tag }}
+        run: |
+          cd "$RUNNER_TEMP"
+          sha256sum candidate.tar > candidate.sha256
+          jq -n --arg source "$SOURCE" --arg upstream "$UPSTREAM" --arg queue "$QUEUE" --arg ref "$REF" --arg tag "$TAG" '{source:$source,upstream:$upstream,queue:$queue,ref:$ref,tag:$tag}' > provenance.json
+      - uses: actions/upload-artifact@v6
+        if: steps.publication.outputs.skip != 'true'
+        with:
+          name: candidate-${{ matrix.channel }}
+          path: |
+            ${{ runner.temp }}/candidate.tar
+            ${{ runner.temp }}/candidate.sha256
+            ${{ runner.temp }}/provenance.json
+          retention-days: 2
+
+  publish:
+    needs: build
+    if: github.repository == 'felixfoertsch/tubearchivist' && github.ref == 'refs/heads/patch-queue'
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [stable, nightly]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install trusted publication tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+      - uses: docker/setup-buildx-action@v4
+      - name: Resolve current official source
+        id: channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .automation/channels.py '${{ matrix.channel }}'
+      - name: Independently reconstruct expected source
+        id: source
+        env:
+          QUEUE: ${{ github.sha }}
+        run: |
+          test "$(git ls-remote origin refs/heads/patch-queue | cut -f1)" = "$QUEUE"
+          echo "main=$(git ls-remote origin refs/heads/main | cut -f1)" >> "$GITHUB_OUTPUT"
+          git clone --no-hardlinks . "$RUNNER_TEMP/source"
+          git -C "$RUNNER_TEMP/source" checkout --detach "$QUEUE"
+          cd "$RUNNER_TEMP/source"
+          python3 "$GITHUB_WORKSPACE/.automation/sync.py" --upstream-ref '${{ steps.channel.outputs.ref }}'
+      - name: Check complete unchanged publication
+        id: publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE: ${{ steps.source.outputs.source_sha }}
+          UPSTREAM: ${{ steps.source.outputs.upstream_sha }}
+          QUEUE: ${{ github.sha }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.rebuild }}
+        run: |
+          args=()
+          if [ "$FORCE" = true ]; then args+=(--force); fi
+          python3 .automation/publication.py '${{ matrix.channel }}' 'ghcr.io/${{ github.repository }}' "$SOURCE" "$UPSTREAM" "$QUEUE" --repair-missing-candidate "${args[@]}"
+      - uses: actions/download-artifact@v7
+        if: steps.publication.outputs.skip != 'true'
+        with:
+          name: candidate-${{ matrix.channel }}
+          path: ${{ runner.temp }}/candidate
+      - name: Verify artifact provenance and revision
+        if: steps.publication.outputs.skip != 'true'
+        env:
+          SOURCE: ${{ steps.source.outputs.source_sha }}
+          UPSTREAM: ${{ steps.source.outputs.upstream_sha }}
+          QUEUE: ${{ github.sha }}
+          REF: ${{ steps.channel.outputs.ref }}
+          TAG: ${{ steps.channel.outputs.tag }}
+        run: |
+          cd "$RUNNER_TEMP/candidate"
+          test "$(cat candidate.sha256)" = "$(sha256sum candidate.tar)"
+          jq -e --arg source "$SOURCE" --arg upstream "$UPSTREAM" --arg queue "$QUEUE" --arg ref "$REF" --arg tag "$TAG" '. == {source:$source,upstream:$upstream,queue:$queue,ref:$ref,tag:$tag}' provenance.json
+          for arch in amd64 arm64; do
+            skopeo inspect --override-os linux --override-arch "$arch" "oci-archive:$RUNNER_TEMP/candidate/candidate.tar" |
+              jq -e --arg source "$SOURCE" --arg upstream "$UPSTREAM" --arg queue "$QUEUE" --arg arch "$arch" '.Architecture == $arch and .Labels["org.opencontainers.image.revision"] == $source and .Labels["org.opencontainers.image.base.digest"] == $upstream and .Labels["de.felixfoertsch.patch-queue"] == $queue'
+          done
+      - name: Publish verified image and source
+        if: steps.publication.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ghcr.io/${{ github.repository }}
+          QUEUE: ${{ github.sha }}
+          SOURCE: ${{ steps.source.outputs.source_sha }}
+          UPSTREAM: ${{ steps.source.outputs.upstream_sha }}
+          REF: ${{ steps.channel.outputs.ref }}
+          TAG: ${{ steps.channel.outputs.tag }}
+          IDENTITY: ${{ steps.channel.outputs.identity }}
+          EXPECTED_MAIN: ${{ steps.source.outputs.main }}
+          CHANNEL: ${{ matrix.channel }}
+        run: |
+          test "$(git ls-remote origin refs/heads/patch-queue | cut -f1)" = "$QUEUE"
+          git fetch --no-tags https://github.com/tubearchivist/tubearchivist.git "$REF"
+          test "$(git rev-parse FETCH_HEAD^{commit})" = "$UPSTREAM"
+          test "$(gh api repos/tubearchivist/tubearchivist/releases/latest --jq .tag_name)" = "$TAG"
+          test -z "$(git ls-remote origin "refs/tags/$IDENTITY")"
+          printf '%s' "$GH_TOKEN" | skopeo login --username '${{ github.actor }}' --password-stdin ghcr.io
+          skopeo copy --all --preserve-digests "oci-archive:$RUNNER_TEMP/candidate/candidate.tar" "docker://$IMAGE:$IDENTITY"
+          digest=$(skopeo inspect --raw "docker://$IMAGE:$IDENTITY" | sha256sum | cut -d' ' -f1)
+          test "$digest" = "$(skopeo inspect --raw "oci-archive:$RUNNER_TEMP/candidate/candidate.tar" | sha256sum | cut -d' ' -f1)"
+          test "$(git ls-remote origin refs/heads/patch-queue | cut -f1)" = "$QUEUE"
+          git fetch --no-tags https://github.com/tubearchivist/tubearchivist.git "$REF"
+          test "$(git rev-parse FETCH_HEAD^{commit})" = "$UPSTREAM"
+          test "$(gh api repos/tubearchivist/tubearchivist/releases/latest --jq .tag_name)" = "$TAG"
+          git -C "$RUNNER_TEMP/source" remote set-url origin 'https://github.com/${{ github.repository }}.git'
+          git -C "$RUNNER_TEMP/source" -c tag.gpgSign=false tag "$IDENTITY" "$SOURCE"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          git -C "$RUNNER_TEMP/source" -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push --force-with-lease="refs/tags/$IDENTITY:" origin "refs/tags/$IDENTITY:refs/tags/$IDENTITY"
+          if [ "$CHANNEL" = nightly ]; then
+            git -C "$RUNNER_TEMP/source" -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push --force-with-lease="refs/heads/main:$EXPECTED_MAIN" origin "$SOURCE:refs/heads/main"
+            tags="nightly edge develop"
+          else
+            tags="latest stable"
+          fi
+          test "$(git ls-remote origin refs/heads/patch-queue | cut -f1)" = "$QUEUE"
+          git fetch --no-tags https://github.com/tubearchivist/tubearchivist.git "$REF"
+          test "$(git rev-parse FETCH_HEAD^{commit})" = "$UPSTREAM"
+          test "$(gh api repos/tubearchivist/tubearchivist/releases/latest --jq .tag_name)" = "$TAG"
+          printf '%s' "$GH_TOKEN" | docker login --username '${{ github.actor }}' --password-stdin ghcr.io
+          args=()
+          for tag in $tags; do args+=(--tag "$IMAGE:$tag"); done
+          docker buildx imagetools create "${args[@]}" "$IMAGE@sha256:$digest"
