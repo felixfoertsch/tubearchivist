@@ -80,6 +80,7 @@ def test_ignored_video_is_skipped_without_failing_queue(
     downloader.task = Mock()
     downloader.task.is_stopped.return_value = False
     downloader._reset_auto = Mock()
+    downloader._rolling_admit = Mock(return_value=True)
     downloader._notify = Mock()
     downloader._dl_single_vid = Mock(return_value=True)
     downloader.move_to_archive = Mock()
@@ -94,6 +95,7 @@ def test_ignored_video_is_skipped_without_failing_queue(
         patch(f"{MODULE}.YoutubeVideo") as video,
         patch(f"{MODULE}.RedisQueue"),
         patch(f"{MODULE}.DownloadPostProcess"),
+        patch("download.src.rolling_window.reconcile_windows"),
     ):
         channel.return_value.get_overwrites.side_effect = [
             {"auto_ignore_filter": TITLE},

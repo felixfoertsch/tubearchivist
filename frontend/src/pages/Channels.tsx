@@ -20,6 +20,7 @@ import { ViewStylesEnum, ViewStylesType } from '../configuration/constants/ViewS
 
 type ChannelOverwritesType = {
   auto_ignore_filter?: string | null;
+  rolling_window_size?: number | null;
   download_format: string | null;
   autodelete_days: number | null;
   index_playlists: boolean | null;
