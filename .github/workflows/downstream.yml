@@ -82,6 +82,7 @@ jobs:
         run: |
           python -m pip install -r requirements-dev.txt
           npm ci --prefix frontend
+          node --test frontend/tests/channel-rolling-window.mjs
           pre-commit run --all-files
           pytest backend
           npm run --prefix frontend build:deploy

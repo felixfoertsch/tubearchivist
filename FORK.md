@@ -30,3 +30,25 @@ untouched.
 
 Images are unofficial fork images. Do not present them as upstream Tube Archivist
 images.
+
+## Channel rolling window ([0005](https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/0005-channel-rolling-window.patch))
+
+Set optional channel override `channel_overwrites.rolling_window_size` to a
+positive integer N from 1 to 2147483647 to retain the N latest eligible regular
+videos by upload date.
+Set it to `null` to disable rolling-window management; disabling does not restore
+previously deleted videos. Normal-video page size `0` also disables this rolling
+scope. Existing watched-age cleanup still applies when rolling is disabled; this
+option does not freeze all deletion. Existing subscription and download schedules
+stay in control; enabling this option does not create a new schedule. Ignored
+videos and channel title filters remain respected. Shorts and streams stay untouched.
+
+**Warning:** Enabling this option lets the channel delete older regular videos,
+including watched, unwatched, manually downloaded, and playlist-downloaded videos
+already in your library. Keep separate backups for videos you want to preserve.
+
+Rolling discovery scans metadata for the full channel, which can be costly for
+large channels. Unavailable or incomplete entries anywhere in that scan can pause
+rolling admission and cleanup. Replacement downloads must complete before older
+videos are pruned; failed or incomplete replacements keep old videos. N is not a
+strict cap during incomplete replacements, so the library can temporarily exceed N.

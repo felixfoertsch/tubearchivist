@@ -41,6 +41,7 @@ class SyncTests(unittest.TestCase):
         return subprocess.run(["python3", ".automation/sync.py", "--upstream-url", str(self.upstream), "--upstream-ref", ref], cwd=self.root, text=True, capture_output=True)
 
     def test_rebuild_removes_automation_and_documents_all_patches(self):
+        patches = [line.strip() for line in (self.root / ".automation/series").read_text(encoding="utf-8").splitlines() if line.strip() and not line.strip().startswith("#")]
         result = self.sync()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.root / ".automation").exists())
@@ -48,14 +49,31 @@ class SyncTests(unittest.TestCase):
         readme = (self.root / "README.md").read_text(encoding="utf-8")
         self.assertTrue(readme.startswith("This fork follows upstream [Tube Archivist]"))
         self.assertEqual(readme.split("\n---\n\n", 1)[1], (self.upstream / "README.md").read_text(encoding="utf-8"))
-        self.assertIn("1. [0001-remove-upstream-ai-policy.patch]", readme)
-        self.assertIn("https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/", readme)
-        self.assertIn("[0001]", readme.splitlines()[0])
+        base = "https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/"
+        links = ", ".join(f"[{name[:4]}]({base}{name})" for name in patches)
+        self.assertIn(f"plus ordered patches {links}. `patch-queue`", readme.splitlines()[0])
+        listing = readme.split("Applied patches, oldest first:\n\n", 1)[1].split("\n---\n\n", 1)[0]
+        self.assertEqual(listing, "".join(f"{index}. [{name}]({base}{name})\n" for index, name in enumerate(patches, 1)))
         self.assertFalse((self.root / ".github/workflows").exists())
-        self.assertIn("0004-simple-download-only-metadata-embedding.patch", readme)
         self.assertEqual([p.name for p in self.root.iterdir() if p.is_file() and p.name.lower().startswith("readme")], ["README.md"])
         for name in ("backend/README.md", "frontend/README.md"):
             self.assertEqual((self.root / name).read_bytes(), (self.upstream / name).read_bytes())
+
+    def test_rolling_window_node_test_runs_in_source_validation(self):
+        workflow = (self.root / ".github/workflows/downstream.yml").read_text(encoding="utf-8")
+        command = "node --test frontend/tests/channel-rolling-window.mjs"
+        self.assertEqual(workflow.count(command), 1)
+        self.assertIn(f"          npm ci --prefix frontend\n          {command}\n          pre-commit run --all-files", workflow)
+
+    def test_rolling_window_patch_reconstructs_api_and_ui(self):
+        patches = [line.strip() for line in (self.root / ".automation/series").read_text(encoding="utf-8").splitlines() if line.strip() and not line.strip().startswith("#")]
+        self.assertEqual(patches[4:5], ["0005-channel-rolling-window.patch"], "Pending rolling-window patch must join accepted queue before this test passes.")
+        result = self.sync()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        serializer = (self.root / "backend/channel/serializers.py").read_text(encoding="utf-8")
+        self.assertIn("rolling_window_size", serializer)
+        self.assertIn("node:test", (self.root / "frontend/tests/channel-rolling-window.mjs").read_text(encoding="utf-8"))
+        self.assertTrue(any("rolling_window_size" in path.read_text(encoding="utf-8") for path in (self.root / "frontend/src").rglob("*.tsx")), "Rebuilt frontend UI must retain rolling-window field.")
 
     def test_metadata_patch_preserves_channel_art_path_helper(self):
         thumbnails = self.upstream / "backend/download/src/thumbnails.py"
