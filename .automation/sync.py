@@ -29,7 +29,8 @@ def fork_readme(upstream: str, patches: list[str]) -> str:
     return ("This fork follows upstream [Tube Archivist](https://github.com/tubearchivist/tubearchivist) "
             f"plus ordered patches {links}. `patch-queue` owns patches and workflows; generated `main` "
             "contains upstream source plus the full queue. Stable builds follow upstream releases; nightly builds follow `develop`.\n\n"
-            "# Patched Tube Archivist\n\nApplied patches, oldest first:\n\n"
+            "# Patched Tube Archivist\n\nPatch 0005 uses subscription page size for rolling windows, "
+            "then deletes and ignores out-of-window regular videos after downloads finish.\n\nApplied patches, oldest first:\n\n"
             + "".join(f"{index}. [{name}]({base}{name})\n" for index, name in enumerate(patches, 1))
             + "\n---\n\n" + upstream)
 

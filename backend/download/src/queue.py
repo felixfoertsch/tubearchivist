@@ -29,6 +29,22 @@ from video.src.constants import VideoTypeEnum
 from video.src.index import YoutubeVideo
 
 
+def delete_and_ignore(videos):
+    """Share watched-age deletion and its normal ignore-queue path."""
+    parsed_ids: list[ParsedURLType] = []
+    for video in videos:
+        YoutubeVideo(video["youtube_id"]).delete_media_file()
+        parsed_ids.append(
+            {
+                "type": "video",
+                "url": video["youtube_id"],
+                "vid_type": VideoTypeEnum(video["vid_type"]),
+            }
+        )
+    if parsed_ids:
+        PendingList(youtube_ids=parsed_ids).parse_url_list(status="ignore")
+
+
 class PendingIndex:
     """base class holding all export methods"""
 
@@ -125,13 +141,9 @@ class PendingList(PendingIndex):
         self.to_skip = False
         self.missing_videos: list[dict] = []
         self.added = 0
-        self.rolling_targets = {}
-        self.rolling_failed = False
-        self.admission_status = "pending"
 
     def parse_url_list(self, status="pending") -> int:
         """extract youtube ids from list"""
-        self.admission_status = status
         self.get_download()
         self.get_indexed()
         self.get_channels()
@@ -208,27 +220,12 @@ class PendingList(PendingIndex):
             vid_type = getattr(VideoTypeEnum, vid_type.upper())
 
         limit = entry.get("limit")
-        from download.src.rolling_window import RollingWindow, window_size
-
-        overwrites = self.channel_overwrites.get(url, {})
-        managed = window_size(overwrites)
-        if vid_type == VideoTypeEnum.VIDEOS and managed:
-            try:
-                rolling = RollingWindow(url, self.config, self.task)
-                video_results = rolling.discover()
-                self.rolling_targets[url] = {v["id"] for v in video_results}
-                self._retry_missing_media(url)
-            except (ValueError, KeyError, TypeError) as err:
-                self.rolling_failed = True
-                print(f"{url}: rolling discovery refused: {err}")
-                return
-        else:
-            video_results = get_last_channel_videos(
-                channel_id=url,
-                config=self.config,
-                limit=limit,
-                query_filter=vid_type,
-            )
+        video_results = get_last_channel_videos(
+            channel_id=url,
+            config=self.config,
+            limit=limit,
+            query_filter=vid_type,
+        )
         if not video_results:
             print(f"{url}: no videos to add from channel, skipping")
             return
@@ -257,23 +254,6 @@ class PendingList(PendingIndex):
                 idx=idx,
                 total=total,
             )
-
-    def _retry_missing_media(self, url):
-        """Retry index entries whose archive move never completed."""
-        # An indexed download can still have failed its archive move.
-        missing_media = {
-            v["youtube_id"]
-            for v in self.all_videos
-            if v["youtube_id"] in self.rolling_targets[url]
-            and not os.path.isfile(
-                os.path.join(EnvironmentSettings.MEDIA_DIR, v["media_url"])
-            )
-        }
-        queued = {v["youtube_id"] for v in self.all_pending}
-        queued.update(v["youtube_id"] for v in self.all_ignored)
-        self.to_skip = [
-            v for v in self.to_skip if v not in missing_media or v in queued
-        ]
 
     def _parse_channel_video(
         self, video_data, vid_type, channel_json
@@ -417,35 +397,6 @@ class PendingList(PendingIndex):
             "vid_type": self._extract_vid_type(video_data),
             "youtube_id": video_data["id"],
         }
-        from download.src.rolling_window import RollingWindow, window_size
-
-        overwrites = self.channel_overwrites.get(to_add["channel_id"], {})
-        if (
-            self.admission_status != "ignore"
-            and to_add["vid_type"] == "videos"
-            and window_size(overwrites)
-        ):
-            try:
-                channel_id = to_add["channel_id"]
-                rolling = RollingWindow(channel_id, self.config, self.task)
-                if not rolling.enabled(overwrites):
-                    raise ValueError("Regular subscription tab disabled")
-                if channel_id not in self.rolling_targets:
-                    self.rolling_targets[channel_id] = {
-                        v["id"]
-                        for v in RollingWindow(
-                            channel_id, self.config, self.task
-                        ).discover()
-                    }
-                targets = self.rolling_targets[channel_id]
-            except (ValueError, KeyError, TypeError) as err:
-                self.rolling_failed = True
-                raise ValueError(
-                    f"{youtube_id}: rolling admission failed; "
-                    f"retry request: {err}"
-                ) from err
-            if youtube_id not in targets:
-                return None
         serializer = DownloadItemSerializer(data=to_add)
         is_valid = serializer.is_valid()
         if not is_valid:

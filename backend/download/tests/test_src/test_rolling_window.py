@@ -1,10 +1,12 @@
-"""Strict rolling windows fail closed before destructive work."""
+"""Bounded regular-video retention fails closed before pruning."""
 
 from unittest.mock import Mock, patch
 
 import pytest
 from channel.serializers import ChannelOverwriteSerializer
 from download.src.rolling_window import RollingWindow, window_size
+from download.src.subscriptions import ChannelSubscription
+from video.src.constants import VideoTypeEnum
 
 MODULE = "download.src.rolling_window"
 
@@ -15,121 +17,137 @@ MODULE = "download.src.rolling_window"
 def test_invalid_sizes(value):
     with pytest.raises(ValueError):
         window_size({"rolling_window_size": value})
-    serializer = ChannelOverwriteSerializer(
+    assert not ChannelOverwriteSerializer(
         data={"rolling_window_size": value}
-    )
-    assert not serializer.is_valid()
+    ).is_valid()
 
 
 @pytest.mark.parametrize("value", [None, 1, 30, 2147483647])
 def test_valid_sizes(value):
     assert window_size({"rolling_window_size": value}) == value
-    serializer = ChannelOverwriteSerializer(
+    assert ChannelOverwriteSerializer(
         data={"rolling_window_size": value}
+    ).is_valid()
+
+
+def test_page_size_override_only_regular_videos():
+    scanner = ChannelSubscription.__new__(ChannelSubscription)
+    scanner.config = {
+        "subscriptions": {
+            "channel_size": 50,
+            "shorts_channel_size": 7,
+            "live_channel_size": 8,
+        }
+    }
+    queries = scanner._process_channel_urls(
+        [
+            {
+                "channel_id": "c",
+                "channel_tabs": ["videos", "shorts", "streams"],
+                "channel_overwrites": {"rolling_window_size": 2},
+            }
+        ]
     )
-    assert serializer.is_valid(), serializer.errors
-
-
-def entry(video_id, timestamp=100, **kwargs):
-    return {
-        "id": video_id,
-        "timestamp": timestamp,
-        "title": video_id,
-        "channel_id": "channel",
-        "live_status": "not_live",
-        **kwargs,
+    assert {q["vid_type"]: q["limit"] for q in queries} == {
+        VideoTypeEnum.VIDEOS: 2,
+        VideoTypeEnum.SHORTS: 7,
+        VideoTypeEnum.STREAMS: 8,
     }
 
 
-def handler():
-    rolling = RollingWindow("channel", {})
-    rolling.settings = Mock(
-        return_value={
-            "rolling_window_size": 2,
-            "subscriptions_channel_size": 50,
-        }
-    )
-    rolling.ignored = Mock(return_value=set())
-    return rolling
-
-
-def test_targets_sorted_filtered_and_tied():
-    rolling = handler()
-    rolling.settings.return_value["auto_ignore_filter"] = "skip"
-    rolling.ignored.return_value = {"ignored"}
-    videos = [
-        entry("skip", 300),
-        entry("ignored", 200),
-        entry("b"),
-        entry("a"),
-        entry("old", 1),
-    ]
-    with patch(f"{MODULE}.YtWrap") as wrapper:
-        wrapper.return_value.extract.return_value = ({"entries": videos}, None)
-        assert [v["id"] for v in rolling.discover()] == ["a", "b"]
-
-
 @pytest.mark.parametrize(
-    "videos",
+    "entries,pending,error,deleted",
     [
-        [],
-        [None],
-        [entry("a", None)],
-        [entry("a", live_status="is_upcoming")],
-        [entry("a", channel_id="other")],
+        ([{"id": "new"}], [], None, True),
+        ([{"id": "new"}], [{"youtube_id": "new"}], None, False),
+        ([], [], None, False),
+        (None, [], ValueError("fetch failed"), False),
+        (None, [], ConnectionError("offline"), False),
     ],
 )
-def test_uncertain_discovery_refuses_cleanup(videos):
-    with patch(f"{MODULE}.YtWrap") as wrapper:
-        wrapper.return_value.extract.return_value = ({"entries": videos}, None)
-        with pytest.raises(ValueError):
-            handler().discover()
-
-
-def test_cleanup_requires_all_target_media_and_current_settings():
-    rolling = handler()
-    rolling.discover = Mock(return_value=[entry("a"), entry("b")])
-    archived = [
-        {"youtube_id": i, "media_url": i + ".mp4"} for i in ["a", "b", "old"]
-    ]
-    with patch(f"{MODULE}.IndexPaginate") as index, patch(
-        f"{MODULE}.os.path.isfile", return_value=False
-    ), patch(f"{MODULE}.YoutubeVideo") as video:
+def test_reconcile(entries, pending, error, deleted):
+    rolling = RollingWindow("c", {"subscriptions": {"channel_size": 50}})
+    rolling.settings = Mock(return_value={"rolling_window_size": 2})
+    with patch(
+        f"{MODULE}.get_last_channel_videos",
+        return_value=entries,
+        side_effect=error,
+    ) as fetch, patch(f"{MODULE}.IndexPaginate") as index, patch(
+        f"{MODULE}.delete_and_ignore"
+    ) as remove:
         index.return_value.get_results.side_effect = [
-            archived,
-            [],
-            archived,
-            [],
+            pending,
+            [
+                {"youtube_id": "new", "vid_type": "videos"},
+                {"youtube_id": "old", "vid_type": "videos"},
+                {"youtube_id": "short", "vid_type": "shorts"},
+                {"youtube_id": "live", "vid_type": "streams"},
+            ],
         ]
         rolling.reconcile()
-        video.assert_not_called()
-    with patch(f"{MODULE}.IndexPaginate") as index, patch(
-        f"{MODULE}.os.path.isfile", return_value=True
-    ), patch(f"{MODULE}.YoutubeVideo") as video:
-        index.return_value.get_results.side_effect = [
-            archived,
-            [],
-            archived,
-            [],
-        ]
-        rolling.reconcile()
+        fetch.assert_called_once_with(
+            "c", rolling.config, limit=2, query_filter=VideoTypeEnum.VIDEOS
+        )
+        if deleted:
+            remove.assert_called_once_with(
+                [{"youtube_id": "old", "vid_type": "videos"}]
+            )
+            pending_query = index.call_args_list[0].args[1]
+            assert {"term": {"vid_type": "videos"}} in pending_query["query"][
+                "bool"
+            ]["filter"]
+        else:
+            remove.assert_not_called()
+        rolling.settings.assert_called_once()
+
+
+def test_flat_fetch_is_bounded_and_discards_error_response():
+    from channel.src.remote_query import get_last_channel_videos
+
+    with patch("channel.src.remote_query.YtWrap") as wrapper:
+        wrapper.return_value.extract.return_value = (
+            {"entries": [{"id": "new"}]},
+            None,
+        )
+        assert get_last_channel_videos(
+            "c", {}, limit=2, query_filter=VideoTypeEnum.VIDEOS
+        ) == [{"id": "new", "vid_type": "videos"}]
+        assert wrapper.call_args.args[0] == {
+            "skip_download": True,
+            "extract_flat": True,
+            "playlist_items": ":2:1",
+        }
+        wrapper.return_value.extract.return_value = (
+            {"entries": [{"id": "partial"}]},
+            "failed",
+        )
+        assert (
+            get_last_channel_videos(
+                "c", {}, limit=2, query_filter=VideoTypeEnum.VIDEOS
+            )
+            == []
+        )
+
+
+def test_delete_and_ignore_reuses_queue():
+    from download.src.queue import delete_and_ignore
+
+    videos = [{"youtube_id": "old", "vid_type": "videos"}]
+    with patch("download.src.queue.YoutubeVideo") as video, patch(
+        "download.src.queue.PendingList"
+    ) as queue:
+        delete_and_ignore(videos)
         video.assert_called_once_with("old")
         video.return_value.delete_media_file.assert_called_once()
-
-
-def test_settings_change_invalidates_cleanup():
-    rolling = handler()
-    rolling.discover = Mock(return_value=[entry("a"), entry("b")])
-    rolling.settings.side_effect = [
-        {"rolling_window_size": 2, "subscriptions_channel_size": 50},
-        {"rolling_window_size": 3, "subscriptions_channel_size": 50},
-    ]
-    with patch(f"{MODULE}.IndexPaginate") as index, patch(
-        f"{MODULE}.os.path.isfile", return_value=True
-    ), patch(f"{MODULE}.YoutubeVideo") as video:
-        index.return_value.get_results.return_value = [
-            {"youtube_id": i, "media_url": i + ".mp4"}
-            for i in ["a", "b", "old"]
-        ]
-        rolling.reconcile()
-        video.assert_not_called()
+        queue.assert_called_once_with(
+            youtube_ids=[
+                {
+                    "type": "video",
+                    "url": "old",
+                    "vid_type": VideoTypeEnum.VIDEOS,
+                }
+            ]
+        )
+        queue.return_value.parse_url_list.assert_called_once_with(
+            status="ignore"
+        )

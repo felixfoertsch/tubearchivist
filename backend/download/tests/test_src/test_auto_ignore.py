@@ -80,7 +80,6 @@ def test_ignored_video_is_skipped_without_failing_queue(
     downloader.task = Mock()
     downloader.task.is_stopped.return_value = False
     downloader._reset_auto = Mock()
-    downloader._rolling_admit = Mock(return_value=True)
     downloader._notify = Mock()
     downloader._dl_single_vid = Mock(return_value=True)
     downloader.move_to_archive = Mock()

@@ -48,7 +48,7 @@ class ChannelSubscription:
         added = pending_handler.parse_url_list()
         from download.src.rolling_window import reconcile_windows
 
-        if not pending_handler.rolling_failed:
+        if not self.task or not self.task.is_stopped():
             reconcile_windows(self.config, self.task)
         return added
 

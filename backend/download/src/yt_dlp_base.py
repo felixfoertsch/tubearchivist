@@ -132,32 +132,6 @@ class YtWrap:
 
         return text, None
 
-    @staticmethod
-    def _unavailable(error):
-        """Only explicit video access failures; unknown errors fail closed."""
-        if isinstance(error, yt_dlp.utils.DownloadError):
-            error = error.exc_info[1] if error.exc_info else None
-        if not isinstance(error, yt_dlp.utils.ExtractorError):
-            return False
-        if not error.expected or error.cause:
-            return False
-        return isinstance(error, yt_dlp.utils.GeoRestrictedError) or (
-            error.orig_msg
-            in {
-                "Video unavailable",
-                "Video unavailable.",
-                "Private video",
-                "Private video.",
-                "This video is private.",
-                "This video has been removed.",
-                "This video has been removed by the uploader",
-                "This video has been removed by the uploader.",
-                "This video has been deleted.",
-                "Join this channel to get access to members-only content "
-                "like this video, and other exclusive perks.",
-            }
-        )
-
     def _rewind_cookie(self):
         """Only wrapper-owned in-memory cookies have a shared cursor."""
         cookie = self.obs.get("cookiefile")
@@ -177,9 +151,7 @@ class YtWrap:
                     return None
         return ydl
 
-    def extract(
-        self, url, *, unavailable_ok=False
-    ) -> tuple[dict | None, str | None]:
+    def extract(self, url) -> tuple[dict | None, str | None]:
         """
         make extract request
         returns response, error
@@ -191,13 +163,9 @@ class YtWrap:
             try:
                 response = ydl.extract_info(url)
             except yt_dlp.utils.ExtractorError as err:
-                if unavailable_ok and self._unavailable(err):
-                    return {"_type": "unavailable"}, None
                 print(f"{url}: failed to extract: {err}, continue...")
                 return None, str(err)
             except yt_dlp.utils.DownloadError as err:
-                if unavailable_ok and self._unavailable(err):
-                    return {"_type": "unavailable"}, None
                 if "This channel does not have a" in str(err):
                     return None, None
 

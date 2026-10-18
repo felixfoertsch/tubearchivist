@@ -22,8 +22,7 @@ from common.src.helper import (
     rand_sleep,
 )
 from common.src.ta_redis import RedisQueue
-from common.src.urlparser import ParsedURLType
-from download.src.queue import PendingList
+from download.src.queue import delete_and_ignore
 from download.src.queue_interact import PendingInteract
 from download.src.yt_dlp_base import YtWrap
 from playlist.src.index import YoutubePlaylist
@@ -69,8 +68,6 @@ class VideoDownloader(DownloaderBase):
 
             if self._auto_ignore(video_data):
                 continue
-            if not self._rolling_admit(video_data):
-                continue
 
             if downloaded > 0:
                 rand_sleep(self.config)
@@ -109,38 +106,6 @@ class VideoDownloader(DownloaderBase):
         DownloadPostProcess(self.task).run()
 
         return downloaded, failed
-
-    def _rolling_admit(self, video_data):
-        """Revalidate queued manual/playlist entries against current policy."""
-        from download.src.rolling_window import RollingWindow, window_size
-
-        if video_data["vid_type"] != "videos":
-            return True
-        if not hasattr(self, "rolling_windows"):
-            self.rolling_windows = {}
-        channel_id = video_data["channel_id"]
-        if channel_id not in self.rolling_windows:
-            self.rolling_windows[channel_id] = RollingWindow(
-                channel_id, self.config, self.task
-            )
-        rolling = self.rolling_windows[channel_id]
-        try:
-            if window_size(rolling.settings()) is None:
-                return True
-            if not rolling.enabled(rolling.settings()):
-                self._handle_error(
-                    video_data["youtube_id"],
-                    "Regular subscription tab disabled",
-                )
-                return False
-            targets = {v["id"] for v in rolling.targets()}
-        except (ValueError, KeyError, TypeError) as err:
-            self._handle_error(video_data["youtube_id"], str(err))
-            return False
-        if video_data["youtube_id"] not in targets:
-            self._delete_from_pending(video_data["youtube_id"])
-            return False
-        return True
 
     def _auto_ignore(self, video_data) -> bool:
         """check current channel settings before downloading a queued video"""
@@ -408,30 +373,13 @@ class DownloadPostProcess(DownloaderBase):
 
         from download.src.rolling_window import owns_video
 
-        deleted = []
-        for video in to_delete:
-            if owns_video(video, self.config):
-                continue
-            youtube_id = video["youtube_id"]
-            print(f"{youtube_id}: auto delete video")
-            YoutubeVideo(youtube_id).delete_media_file()
-            deleted.append(video)
-
-        print("add deleted to ignore list")
-
-        parsed_ids: list[ParsedURLType] = []
-
-        for video_item in deleted:
-            vid_type = getattr(VideoTypeEnum, video_item["vid_type"].upper())
-            parsed_ids.append(
-                {
-                    "type": "video",
-                    "url": video_item["youtube_id"],
-                    "vid_type": vid_type,
-                }
-            )
-
-        PendingList(youtube_ids=parsed_ids).parse_url_list(status="ignore")
+        delete_and_ignore(
+            [
+                video
+                for video in to_delete
+                if not owns_video(video, self.config)
+            ]
+        )
 
     def refresh_playlist(self) -> None:
         """match videos with playlists"""

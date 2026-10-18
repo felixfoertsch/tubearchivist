@@ -1,13 +1,11 @@
 """Rolling admission, cleanup and scan boundaries."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 from channel.src.index import YoutubeChannel
-from download.src.queue import PendingList
 from download.src.rolling_window import owns_video
 from download.src.subscriptions import ChannelSubscription
-from download.src.yt_dlp_handler import VideoDownloader
 
 
 @pytest.mark.parametrize(
@@ -59,57 +57,6 @@ def test_window_overrides_scan_depth_without_enabling_other_tabs():
     assert queries == []
 
 
-@pytest.mark.parametrize(
-    "targets,allowed", [([{"id": "v"}], True), ([{"id": "other"}], False)]
-)
-def test_queued_manual_video_revalidated(targets, allowed):
-    downloader = object.__new__(VideoDownloader)
-    downloader.config = {}
-    downloader.task = None
-    downloader._delete_from_pending = Mock()
-    with patch("download.src.rolling_window.RollingWindow") as rolling:
-        rolling.return_value.settings.return_value = {
-            "rolling_window_size": 1,
-            "subscriptions_channel_size": 50,
-        }
-        rolling.return_value.targets.return_value = targets
-        assert (
-            downloader._rolling_admit(
-                {"youtube_id": "v", "channel_id": "c", "vid_type": "videos"}
-            )
-            == allowed
-        )
-        assert downloader._delete_from_pending.called is not allowed
-
-
-def test_manual_and_playlist_admission_reject_outside_window():
-    pending = object.__new__(PendingList)
-    pending.channel_overwrites = {
-        "c": {"rolling_window_size": 1, "subscriptions_channel_size": 50}
-    }
-    pending.rolling_targets = {"c": {"new"}}
-    pending.admission_status = "pending"
-    pending.all_channels = ["c"]
-    pending.config = {}
-    pending.task = None
-    with patch.object(
-        pending, "_extract_thumb", return_value="thumb"
-    ), patch.object(pending, "_extract_vid_type", return_value="videos"):
-        assert (
-            pending._parse_entry(
-                "old",
-                {
-                    "id": "old",
-                    "title": "old",
-                    "channel_id": "c",
-                    "channel": "C",
-                    "timestamp": 100,
-                },
-            )
-            is None
-        )
-
-
 def test_no_new_download_scan_still_reconciles():
     scanner = object.__new__(ChannelSubscription)
     scanner.config = {"subscriptions": {}}
@@ -122,6 +69,5 @@ def test_no_new_download_scan_still_reconciles():
         "download.src.rolling_window.reconcile_windows"
     ) as reconcile:
         pending.return_value.parse_url_list.return_value = 0
-        pending.return_value.rolling_failed = False
         assert scanner.find_missing() == 0
         reconcile.assert_called_once_with(scanner.config, None)

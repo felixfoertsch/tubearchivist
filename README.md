@@ -2,6 +2,8 @@ This fork follows upstream [Tube Archivist](https://github.com/tubearchivist/tub
 
 # Patched Tube Archivist
 
+Patch 0005 uses subscription page size for rolling windows, then deletes and ignores out-of-window regular videos after downloads finish.
+
 Applied patches, oldest first:
 
 1. [0001-remove-upstream-ai-policy.patch](https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/0001-remove-upstream-ai-policy.patch)

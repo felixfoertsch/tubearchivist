@@ -34,8 +34,9 @@ images.
 ## Channel rolling window ([0005](https://github.com/felixfoertsch/tubearchivist/blob/patch-queue/.automation/patches/0005-channel-rolling-window.patch))
 
 Set optional channel override `channel_overwrites.rolling_window_size` to a
-positive integer N from 1 to 2147483647 to retain the N latest eligible regular
-accessible videos by upload date.
+positive integer N from 1 to 2147483647 to use N as the regular-video subscription
+page size. The flat query trusts YouTube's newest-first videos tab order; it does
+not scan full-channel metadata or make per-video admission requests.
 Set it to `null` to disable rolling-window management; disabling does not restore
 previously deleted videos. Normal-video page size `0` also disables this rolling
 scope. Existing watched-age cleanup still applies when rolling is disabled; this
@@ -47,11 +48,13 @@ videos and channel title filters remain respected. Shorts and streams stay untou
 including watched, unwatched, manually downloaded, and playlist-downloaded videos
 already in your library. Keep separate backups for videos you want to preserve.
 
-Rolling discovery scans metadata for the full channel, which can be costly for
-large channels. Confirmed unavailable, private, members-only, premium-only and
-region-restricted videos are skipped. Unknown access errors, authentication
-challenges, network failures and incomplete enumeration pause rolling admission
-and cleanup; generic errors are never treated as proof of unavailability.
-Replacement downloads must complete before older videos are pruned; failed or
-incomplete replacements keep old videos. N is not a
-strict cap during incomplete replacements, so the library can temporarily exceed N.
+After subscription scans and successful download batches, one bounded flat query
+fetches the latest N regular-video IDs. Failed or empty queries skip pruning, as
+do pending regular downloads. Once downloads finish, archived regular videos
+outside that set are deleted and added to the normal ignore queue. Shorts and
+streams are never pruned. Unavailable or members-only entries can leave fewer
+than N archived videos; no replacement is required for those entries.
+
+Deleted videos stay ignored until explicitly un-ignored, including after disabling
+the window with `null`. Manual, playlist and rescan additions respect that ignore
+queue. Pending downloads can temporarily leave more than N archived videos.

@@ -98,11 +98,9 @@ function mount(initialValue) {
 test('validates positive whole numbers without sending invalid requests', async () => {
   const ui = mount();
   assert.equal(ui.value(), '');
-  assert.match(ui.text(), /Channel scans may be slow for large channels/);
-  assert.match(
-    ui.text(),
-    /unavailable or members-only videos are skipped; uncertain metadata or incomplete scans postpone rolling downloads and cleanup/,
-  );
+  assert.match(ui.text(), /Uses the regular-video page size, not a full-channel scan/);
+  assert.match(ui.text(), /Pending downloads, failed or empty scans postpone cleanup/);
+  assert.match(ui.text(), /Deleted videos stay ignored until you un-ignore them/);
   for (const value of [
     '0',
     '-1',

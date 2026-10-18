@@ -46,17 +46,17 @@ const ChannelRollingWindow = ({ channelId, initialValue }: Props) => {
         <h2>Channel Rolling Window</h2>
         <p id="rolling-window-warning">
           <strong className="danger-zone">Warning: permanent deletion.</strong> Keeps only the
-          latest N regular videos by upload date, deleting older videos whether watched or
+          latest N regular videos in YouTube's videos tab, deleting older videos whether watched or
           unwatched. This includes all existing, manually downloaded, and playlist videos from this
           channel. Shorts and stream recordings are not affected.
         </p>
         <p id="rolling-window-help">
           Leave blank or reset to disable. Uses existing title ignore filters, subscription
-          scheduling, and download auto-start settings. Replacement downloads must finish
-          successfully before cleanup; failures postpone deletion. Saving does not start downloads
-          or delete videos immediately. Channel scans may be slow for large channels. Confirmed
-          unavailable or members-only videos are skipped; uncertain metadata or incomplete scans
-          postpone rolling downloads and cleanup.
+          scheduling, and download auto-start settings. Uses the regular-video page size, not a
+          full-channel scan. Pending downloads, failed or empty scans postpone cleanup. Unavailable
+          or members-only entries can leave fewer videos. Saving does not start downloads or delete
+          videos immediately. Deleted videos stay ignored until you un-ignore them; disabling does
+          not restore deleted videos.
         </p>
         <p>Saved limit: {savedValue === null ? 'Disabled' : `${savedValue} regular videos`}</p>
         <form
