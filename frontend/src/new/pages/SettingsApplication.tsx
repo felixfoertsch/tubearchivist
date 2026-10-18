@@ -4,7 +4,6 @@ import useIsAdmin from '../../functions/useIsAdmin';
 import type { AppSettingsConfigType } from '../../api/loader/loadAppsettingsConfig';
 import type { SnapshotListType } from '../../api/loader/loadSnapshots';
 import type { CookieStateType } from '../../api/loader/loadCookie';
-import SettingsFrame from '../components/SettingsFrame';
 import { SettingsApplicationSection } from '../components/SettingsApplicationSections';
 import {
   isoDateTime,
@@ -197,7 +196,7 @@ function AdminSettings() {
     await saveApplicationSetting(group, key, value);
   }
   return (
-    <SettingsFrame title="Application settings">
+    <>
       {dialog}
       <p className="text-sm text-muted-foreground">
         Server-wide settings. Secret values stay masked unless revealed.
@@ -570,16 +569,12 @@ function AdminSettings() {
           </SettingsApplicationSection>
         </>
       )}
-    </SettingsFrame>
+    </>
   );
 }
 function SettingsApplication() {
   const isAdmin = useIsAdmin();
-  return isAdmin ? (
-    <AdminSettings />
-  ) : (
-    <SettingsFrame title="Application settings">Administrator access required.</SettingsFrame>
-  );
+  return isAdmin ? <AdminSettings /> : <>Administrator access required.</>;
 }
 function SettingField({
   group,

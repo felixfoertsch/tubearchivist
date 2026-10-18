@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react';
 import useIsAdmin from '../../functions/useIsAdmin';
 import type { ScheduleResponseType } from '../../api/loader/loadSchedule';
 import type { AppriseNotificationType } from '../../api/loader/loadAppriseNotification';
-import SettingsFrame from '../components/SettingsFrame';
 import { requestJson, objectData, settingsError } from '../lib/settings';
 import { schedulePayload, scheduleConfig, scheduleTimestamp } from '../lib/settingsSchedule';
 import { Card } from '../ui/card';
@@ -74,7 +73,7 @@ function ScheduleEditor({
   return (
     <Card className="gap-3 p-4">
       {dialog}
-      <h2 className="font-semibold">{title}</h2>
+      <h3 className="font-semibold">{title}</h3>
       <p className="text-sm text-muted-foreground">
         Current: {current ? `${current.schedule} (${current.schedule_human})` : 'Disabled'}
         {current && (
@@ -299,7 +298,7 @@ function Scheduler() {
       )}
       {notifications && (
         <Card className="gap-3 p-4">
-          <h2 className="font-semibold">Task notifications</h2>
+          <h3 className="font-semibold">Task notifications</h3>
           <p className="text-sm">
             Apprise sends notifications when tasks complete. Destination URLs may contain
             credentials.
@@ -382,5 +381,5 @@ function Scheduler() {
 }
 export default function SettingsScheduling() {
   const admin = useIsAdmin();
-  return <SettingsFrame title="Scheduling">{admin && <Scheduler />}</SettingsFrame>;
+  return admin ? <Scheduler /> : null;
 }
