@@ -532,7 +532,7 @@ export function createPreviewServer({ dist = defaultDist, fixtureMedia } = {}) {
               page_size: size,
               page_from: from,
               total_hits: count,
-              last_page: page < last && last > 1 ? last : false,
+              last_page: page < last && last > 1 ? last : 0,
               prev_pages:
                 page <= 1
                   ? null
@@ -585,6 +585,19 @@ export function createPreviewServer({ dist = defaultDist, fixtureMedia } = {}) {
               last_login: '2026-01-12T10:00:00Z',
             });
           case 'user':
+            if (write) {
+              for (const field of [
+                'view_style_home',
+                'view_style_channel',
+                'view_style_playlist',
+                'view_style_downloads',
+              ]) {
+                const choices =
+                  field === 'view_style_downloads' ? ['grid', 'list'] : ['grid', 'list', 'table'];
+                if (Object.hasOwn(body, field) && !choices.includes(body[field]))
+                  return send(400, { error: `Invalid ${field}` });
+              }
+            }
             return send(200, write ? merge(data.user, body) : data.user);
           case 'config':
             return send(200, write ? merge(data.config, body) : data.config);
@@ -900,7 +913,7 @@ export function createPreviewServer({ dist = defaultDist, fixtureMedia } = {}) {
                       ],
                       api_stop: true,
                       level: state.taskMode === 'error' ? 'error' : 'info',
-                      command: false,
+                      command: null,
                     },
                   ],
             );

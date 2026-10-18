@@ -6,7 +6,7 @@ import deleteDownloadById from '../../api/actions/deleteDownloadById';
 import updateDownloadQueueStatusById from '../../api/actions/updateDownloadQueueStatusById';
 import NewRoutes from '../routes';
 import { Button } from '../ui/button';
-import { Card } from '../ui/card';
+import { CollectionImage, CollectionItem } from './Collection';
 import type { DownloadRecord } from '../lib/download';
 
 export function DownloadItem({
@@ -47,32 +47,34 @@ export function DownloadItem({
     }
   };
   return (
-    <Card className={`flex flex-col gap-2 overflow-hidden p-2 ${grid ? '' : 'sm:flex-row'}`}>
-      {dialog}
-      <a
-        className="shrink-0"
-        href={`https://www.youtube.com/watch?v=${encodeURIComponent(download.youtube_id)}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label={`Open ${download.title} on YouTube`}
-      >
-        <img
-          className={`aspect-video w-full rounded object-cover ${grid ? '' : 'sm:w-40'}`}
-          src={download.vid_thumb_url ?? ''}
-          alt=""
-        />
-      </a>
-      <div className="min-w-0 flex-1 space-y-1">
-        <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
-          {download.channel_indexed ? (
-            <Link to={NewRoutes.Channel(download.channel_id)}>{download.channel_name}</Link>
-          ) : (
-            <span>{download.channel_name}</span>
-          )}
-          <span>{ignored ? 'Ignored' : 'Pending'}</span>
-          <span>{download.vid_type}</span>
-          {download.auto_start && <span>Auto</span>}
-        </div>
+    <CollectionItem
+      compact={!grid}
+      media={
+        <a
+          className="shrink-0"
+          href={`https://www.youtube.com/watch?v=${encodeURIComponent(download.youtube_id)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`Open ${download.title} on YouTube`}
+        >
+          <CollectionImage src={download.vid_thumb_url ?? ''} compact={!grid} />
+        </a>
+      }
+      metadata={
+        <>
+          <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+            {download.channel_indexed ? (
+              <Link to={NewRoutes.Channel(download.channel_id)}>{download.channel_name}</Link>
+            ) : (
+              <span>{download.channel_name}</span>
+            )}
+            <span>{ignored ? 'Ignored' : 'Pending'}</span>
+            <span>{download.vid_type}</span>
+            {download.auto_start && <span>Auto</span>}
+          </div>
+        </>
+      }
+      title={
         <a
           className="font-medium hover:underline"
           href={`https://www.youtube.com/watch?v=${encodeURIComponent(download.youtube_id)}`}
@@ -81,11 +83,8 @@ export function DownloadItem({
         >
           {download.title}
         </a>
-        <p className="text-xs text-muted-foreground">
-          {download.published && `${isoDate(download.published)} · `}
-          {download.duration} · {download.youtube_id}
-        </p>
-        {download.message && <p className="text-sm text-foreground">{download.message}</p>}
+      }
+      actions={
         <div className="flex flex-wrap gap-1">
           {ignored ? (
             <>
@@ -172,12 +171,19 @@ export function DownloadItem({
             </Button>
           )}
         </div>
-        {error && (
-          <p role="alert" className="text-xs text-foreground">
-            {error}
-          </p>
-        )}
-      </div>
-    </Card>
+      }
+    >
+      {dialog}
+      <p className="text-xs text-muted-foreground">
+        {download.published && `${isoDate(download.published)} · `}
+        {download.duration} · {download.youtube_id}
+      </p>
+      {download.message && <p className="text-sm text-foreground">{download.message}</p>}
+      {error && (
+        <p role="alert" className="text-xs text-foreground">
+          {error}
+        </p>
+      )}
+    </CollectionItem>
   );
 }

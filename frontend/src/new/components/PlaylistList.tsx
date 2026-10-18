@@ -7,7 +7,8 @@ import updatePlaylistSubscription from '../../api/actions/updatePlaylistSubscrip
 import useIsAdmin from '../../functions/useIsAdmin';
 import { useUserConfigStore } from '../../stores/UserConfigStore';
 import { Button } from '../ui/button';
-import { Card } from '../ui/card';
+import { Collection, CollectionImage, CollectionItem } from './Collection';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 
 export function PlaylistList({
   playlists,
@@ -18,24 +19,29 @@ export function PlaylistList({
 }) {
   const { userConfig } = useUserConfigStore();
   const view = userConfig.view_style_playlist;
-  const grid =
-    view === 'grid'
-      ? 'grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-[repeat(var(--playlist-columns),minmax(0,1fr))]'
-      : 'flex flex-col gap-3';
-  return (
-    <div
-      className={grid}
-      style={{ ['--playlist-columns' as string]: Math.min(7, Math.max(3, userConfig.grid_items)) }}
-    >
-      {playlists.map(playlist => (
-        <PlaylistListItem
-          key={playlist.playlist_id}
-          playlist={playlist}
-          refresh={refresh}
-          view={view}
-        />
-      ))}
-    </div>
+  const rows = playlists.map(playlist => (
+    <PlaylistListItem
+      key={playlist.playlist_id}
+      playlist={playlist}
+      refresh={refresh}
+      view={view}
+    />
+  ));
+  return view === 'table' ? (
+    <Table className="table-fixed" aria-label="Playlists">
+      <TableHeader>
+        <TableRow>
+          <TableHead>Playlist</TableHead>
+          <TableHead className="hidden w-36 sm:table-cell">Last refreshed</TableHead>
+          <TableHead className="w-36">
+            <span className="sr-only">Subscription</span>
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>{rows}</TableBody>
+    </Table>
+  ) : (
+    <Collection grid={view === 'grid'}>{rows}</Collection>
   );
 }
 
@@ -65,53 +71,77 @@ function PlaylistListItem({
     }
   };
   const playlistHref = NewRoutes.Playlist(playlist.playlist_id);
-  return (
-    <Card className={`gap-0 overflow-hidden py-0 ${view === 'list' ? 'sm:flex-row' : ''}`}>
-      <Link to={playlistHref} aria-label={`Open ${playlist.playlist_name}`}>
-        <img
-          className={`aspect-video w-full object-cover ${view === 'list' ? 'sm:h-28 sm:w-48' : ''}`}
-          src={playlist.playlist_thumbnail || '/img/default-playlist-thumb.jpg'}
-          alt=""
-        />
-      </Link>
-      <div className="min-w-0 flex-1 space-y-2 p-3">
-        {playlist.playlist_type !== 'custom' && (
+  const action = playlist.playlist_type !== 'custom' && isAdmin && (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={pending}
+      onClick={() => void subscribed(!playlist.playlist_subscribed)}
+    >
+      {pending
+        ? 'Saving…'
+        : playlist.playlist_subscribed
+          ? 'Unsubscribe playlist'
+          : 'Subscribe playlist'}
+    </Button>
+  );
+  if (view === 'table')
+    return (
+      <TableRow>
+        <TableCell className="whitespace-normal">
           <Link
-            className="text-xs text-muted-foreground hover:underline"
-            to={NewRoutes.Channel(playlist.playlist_channel_id)}
+            className="flex min-h-10 min-w-0 items-center gap-3 text-sm font-semibold hover:underline"
+            to={playlistHref}
+            title={playlist.playlist_name}
           >
-            {playlist.playlist_channel}
+            <CollectionImage
+              src={playlist.playlist_thumbnail || '/img/default-playlist-thumb.jpg'}
+              compact
+            />
+            <span className="truncate">{playlist.playlist_name}</span>
           </Link>
-        )}
-        <h2 className="font-semibold">
-          <Link to={playlistHref} className="hover:underline">
-            {playlist.playlist_name}
-          </Link>
-        </h2>
-        <p className="text-xs text-muted-foreground">
-          Last refreshed: {isoDate(playlist.playlist_last_refresh)}
+          {error && <p role="alert">{error}</p>}
+        </TableCell>
+        <TableCell className="hidden sm:table-cell">
+          {isoDate(playlist.playlist_last_refresh)}
+        </TableCell>
+        <TableCell>{action}</TableCell>
+      </TableRow>
+    );
+  return (
+    <CollectionItem
+      compact={view !== 'grid'}
+      media={
+        <Link to={playlistHref} aria-label={`Open ${playlist.playlist_name}`}>
+          <CollectionImage
+            src={playlist.playlist_thumbnail || '/img/default-playlist-thumb.jpg'}
+            compact={view !== 'grid'}
+          />
+        </Link>
+      }
+      title={
+        <Link to={playlistHref} title={playlist.playlist_name}>
+          {playlist.playlist_name}
+        </Link>
+      }
+      metadata={
+        <>
+          {playlist.playlist_type !== 'custom' && (
+            <Link to={NewRoutes.Channel(playlist.playlist_channel_id)}>
+              {playlist.playlist_channel}
+            </Link>
+          )}
+          <span>Last refreshed: {isoDate(playlist.playlist_last_refresh)}</span>
+        </>
+      }
+      actions={action}
+    >
+      {error && (
+        <p role="alert" className="text-sm text-foreground">
+          {error}
         </p>
-        {playlist.playlist_type !== 'custom' && isAdmin && (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={pending}
-            onClick={() => void subscribed(!playlist.playlist_subscribed)}
-          >
-            {pending
-              ? 'Saving…'
-              : playlist.playlist_subscribed
-                ? 'Unsubscribe playlist'
-                : 'Subscribe playlist'}
-          </Button>
-        )}
-        {error && (
-          <p role="alert" className="text-sm text-foreground">
-            {error}
-          </p>
-        )}
-      </div>
-    </Card>
+      )}
+    </CollectionItem>
   );
 }
 

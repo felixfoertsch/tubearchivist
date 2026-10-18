@@ -47,9 +47,9 @@ function Player({
   const media = useRef<HTMLVideoElement>(null);
   const container = useRef<HTMLDivElement>(null);
   const [query] = useSearchParams();
-  const initialPosition = useRef(
-    playerTimestamp(query.get('t'), playerPosition(video.player.position)),
-  );
+  const timestamp = query.get('t');
+  const initialPosition = useRef(playerTimestamp(timestamp, playerPosition(video.player.position)));
+  const previousTimestamp = useRef(timestamp);
   const callbacks = useRef({ onWatchStateChanged, onVideoEnd, watched: video.player.watched });
   const [speed, setSpeed] = useState(() => {
     const value = Number(localStorage.getItem('playerSpeed') ?? 1);
@@ -161,25 +161,31 @@ function Player({
     const element = media.current;
     if (!element) return;
     const seek = () => {
-      if (seekToTimestamp === undefined || !Number.isFinite(element.duration)) return;
+      const queryPosition =
+        previousTimestamp.current !== timestamp ? playerTimestamp(timestamp, NaN) : undefined;
+      const requestedSeek =
+        seekToTimestamp ?? (Number.isFinite(queryPosition) ? queryPosition : undefined);
+      if (requestedSeek === undefined || !Number.isFinite(element.duration)) return;
       if (
-        !Number.isFinite(seekToTimestamp) ||
-        seekToTimestamp < 0 ||
-        seekToTimestamp > element.duration
+        !Number.isFinite(requestedSeek) ||
+        requestedSeek < 0 ||
+        requestedSeek > element.duration
       ) {
         setError('Timestamp outside video duration. Choose another timestamp.');
         setSeekToTimestamp?.(undefined);
+        previousTimestamp.current = timestamp;
         return;
       }
-      element.currentTime = seekToTimestamp;
+      element.currentTime = requestedSeek;
       setSeekToTimestamp?.(undefined);
+      previousTimestamp.current = timestamp;
       void play();
       container.current?.scrollIntoView({ block: 'start' });
     };
     seek();
     element.addEventListener('loadedmetadata', seek);
     return () => element.removeEventListener('loadedmetadata', seek);
-  }, [seekToTimestamp, setSeekToTimestamp, play]);
+  }, [timestamp, seekToTimestamp, setSeekToTimestamp, play]);
 
   useEffect(() => {
     const element = media.current;

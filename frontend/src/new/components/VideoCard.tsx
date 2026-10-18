@@ -1,5 +1,5 @@
 import { useConfirm } from './useConfirm';
-import { collectionBody, collectionCard } from './collectionLayout';
+import { CollectionImage, CollectionItem } from './Collection';
 import { useState } from 'react';
 import NewRoutes from '../routes';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -9,7 +9,6 @@ import deleteVideoProgressById from '../../api/actions/deleteVideoProgressById';
 import updateCustomPlaylist from '../../api/actions/updateCustomPlaylist';
 import useIsAdmin from '../../functions/useIsAdmin';
 import { Button } from '../ui/button';
-import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Progress } from '../ui/progress';
 import { errorMessage, assertResponse, duration, isoDate, progress } from '../videoMetadata';
@@ -65,38 +64,32 @@ export default function VideoCard({
   };
   const href = NewRoutes.Video(video.youtube_id);
   return (
-    <Card className={`${collectionCard} ${compact ? 'flex-row' : ''}`}>
-      {dialog}
-      <Link to={href} onClick={playInline} aria-label={`Play ${video.title}`} className="shrink-0">
-        <img
-          className={`aspect-video w-full object-cover ${compact ? 'h-20 w-28 sm:h-24 sm:w-36' : ''}`}
-          src={video.vid_thumb_url}
-          alt=""
-          loading="lazy"
-        />
-      </Link>
-      <div className={compact ? 'min-w-0 flex-1 space-y-1 p-2' : collectionBody}>
-        {selection}
-        <Link className="line-clamp-2 text-sm font-semibold hover:underline" to={href}>
+    <CollectionItem
+      compact={compact}
+      media={
+        <Link
+          to={href}
+          onClick={playInline}
+          aria-label={`Play ${video.title}`}
+          className="shrink-0"
+        >
+          <CollectionImage src={video.vid_thumb_url} compact={compact} />
+        </Link>
+      }
+      title={
+        <Link to={href} title={video.title}>
           {video.title}
         </Link>
-        <div className="flex flex-wrap gap-2 text-xs">
+      }
+      metadata={
+        <>
           <Link to={NewRoutes.Channel(video.channel.channel_id)}>{video.channel.channel_name}</Link>
           <Badge variant="secondary">{video.vid_type}</Badge>
           <span>{video.player.duration_str || duration(video.player.duration)}</span>
           <time dateTime={video.published}>{isoDate(video.published)}</time>
-        </div>
-        {video.player.position > 0 && (
-          <div className="flex min-w-0 max-w-full items-center gap-2 text-xs">
-            <Progress
-              aria-label={`Watch progress for ${video.title}`}
-              value={progress(video.player.position, video.player.duration)}
-            />
-            <span className="shrink-0">
-              {duration(video.player.position)} / {duration(video.player.duration)}
-            </span>
-          </div>
-        )}
+        </>
+      }
+      actions={
         <fieldset disabled={pending} className="flex flex-wrap gap-1">
           <Button
             variant="outline"
@@ -148,12 +141,26 @@ export default function VideoCard({
               </Button>
             ))}
         </fieldset>
-        {error && (
-          <p role="alert" className="text-sm text-foreground">
-            {error}
-          </p>
-        )}
-      </div>
-    </Card>
+      }
+    >
+      {dialog}
+      {selection}
+      {video.player.position > 0 && (
+        <div className="flex min-w-0 max-w-full items-center gap-2 text-xs">
+          <Progress
+            aria-label={`Watch progress for ${video.title}`}
+            value={progress(video.player.position, video.player.duration)}
+          />
+          <span className="shrink-0">
+            {duration(video.player.position)} / {duration(video.player.duration)}
+          </span>
+        </div>
+      )}
+      {error && (
+        <p role="alert" className="text-sm text-foreground">
+          {error}
+        </p>
+      )}
+    </CollectionItem>
   );
 }

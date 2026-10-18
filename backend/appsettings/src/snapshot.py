@@ -3,6 +3,7 @@ functionality:
 - handle snapshots in ES
 """
 
+import re
 from datetime import datetime
 from time import sleep
 from zoneinfo import ZoneInfo
@@ -260,13 +261,63 @@ class ElasticSnapshot:
 
     def restore_all(self, snapshot_name):
         """restore snapshot by name"""
+        path = f"_snapshot/{self.REPO}/{snapshot_name}"
+        response, status_code = ElasticWrap(path).get()
+        snapshots = (
+            response.get("snapshots") if isinstance(response, dict) else None
+        )
+        if (
+            status_code != 200
+            or not isinstance(snapshots, list)
+            or len(snapshots) != 1
+            or not isinstance(snapshots[0], dict)
+        ):
+            return False
+
+        snapshot = snapshots[0]
+        indices = snapshot.get("indices")
+        if (
+            snapshot.get("snapshot") != snapshot_name
+            or snapshot.get("state") != "SUCCESS"
+            or not isinstance(indices, list)
+            or not all(isinstance(index, str) for index in indices)
+            or not all(
+                any(
+                    re.fullmatch(re.escape(index) + r"(?:_v[0-9]+)?", name)
+                    for name in indices
+                )
+                for index in self.all_indices
+            )
+        ):
+            return False
+
+        # Resolve live indices before deletion; reject error bodies.
+        to_delete = []
         for index in self.all_indices:
             response, status_code = ElasticWrap(index).get()
             if status_code == 404:
                 continue
+            if (
+                status_code != 200
+                or not isinstance(response, dict)
+                or len(response) != 1
+            ):
+                return False
+            index_alias = next(iter(response))
+            if not re.fullmatch(
+                re.escape(index) + r"(?:_v[0-9]+)?", index_alias
+            ):
+                return False
+            to_delete.append(index_alias)
 
-            index_alias = list(response.keys())[0]
-            _, _ = ElasticWrap(index_alias).delete()
+        for index_alias in to_delete:
+            response, status_code = ElasticWrap(index_alias).delete()
+            if (
+                status_code != 200
+                or not isinstance(response, dict)
+                or response.get("acknowledged") is not True
+            ):
+                return False
 
         path = f"_snapshot/{self.REPO}/{snapshot_name}/_restore"
         data = {"indices": "*,-.*"}

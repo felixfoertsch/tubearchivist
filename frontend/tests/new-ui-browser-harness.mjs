@@ -76,6 +76,12 @@ test('local preview HTTP boundary, modes, permissions and in-memory writes', asy
       403,
     );
     assert.equal((await call('/api/user/me/', { page_size: 24 })).data.page_size, 24);
+    for (const field of ['view_style_channel', 'view_style_playlist']) {
+      assert.equal((await call('/api/user/me/', { [field]: 'table' })).data[field], 'table');
+      assert.equal((await call('/api/user/me/', { [field]: 'unsupported' })).status, 400);
+      assert.equal((await call('/api/user/me/')).data[field], 'table');
+    }
+    assert.equal((await call('/api/user/me/', { view_style_downloads: 'table' })).status, 400);
     await call('/__preview__/state', { account: 'anonymous' });
     assert.equal((await call('/api/ping/')).status, 401);
     const invalidLogin = await call('/api/user/login/', {
@@ -133,15 +139,15 @@ test('local preview HTTP boundary, modes, permissions and in-memory writes', asy
     const finalPage = (await call('/api/video/?page=2')).data;
     assert.equal(finalPage.data[0].youtube_id, 'local-second');
     assert.deepEqual(finalPage.paginate.prev_pages, []);
-    assert.equal(finalPage.paginate.last_page, false);
+    assert.equal(finalPage.paginate.last_page, 0);
     assert.equal((await call('/api/video/?page=1')).data.data[0].youtube_id, ids.video);
     const channels = (await call('/api/channel/')).data;
     assert.equal(channels.data[0].channel_id, ids.channel);
-    assert.equal(channels.paginate.last_page, false);
+    assert.equal(channels.paginate.last_page, 0);
     const playlists = (await call('/api/playlist/')).data;
     assert.equal(playlists.data[0].playlist_id, ids.playlist);
     assert.equal(playlists.paginate.last_page, 2);
-    assert.equal((await call('/api/playlist/?page=2')).data.paginate.last_page, false);
+    assert.equal((await call('/api/playlist/?page=2')).data.paginate.last_page, 0);
     assert.equal(
       (await call(`/api/video/${ids.video}/similar/`)).data[0].youtube_id,
       'local-second',

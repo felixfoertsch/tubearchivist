@@ -8,7 +8,7 @@ type NotificationType = {
   api_stop: boolean;
   level: string;
   id: string;
-  command: boolean | string;
+  command?: boolean | string | null;
   messages: string[];
   progress: number;
 };

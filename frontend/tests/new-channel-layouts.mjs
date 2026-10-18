@@ -51,6 +51,9 @@ test('channel directory renders distinct compact saved views', async t => {
       server: { middlewareMode: true, hmr: false, ws: false },
     });
     const { ChannelsList } = await server.ssrLoadModule('/src/new/components/ChannelsList.tsx');
+    const { PlaylistList } = await server.ssrLoadModule('/src/new/components/PlaylistList.tsx');
+    const { DownloadItem } = await server.ssrLoadModule('/src/new/components/DownloadItem.tsx');
+    const { Collection } = await server.ssrLoadModule('/src/new/components/Collection.tsx');
     const { VideoCollection } = await server.ssrLoadModule(
       '/src/new/components/VideoCollection.tsx',
     );
@@ -140,6 +143,48 @@ test('channel directory renders distinct compact saved views', async t => {
         }
       },
     );
+    await t.test('all directory domains render same semantic compact row and media slot', () => {
+      const data = previewData();
+      const { userConfig } = useUserConfigStore.getInitialState();
+      Object.assign(useUserConfigStore.getInitialState(), {
+        userConfig: { ...userConfig, view_style_playlist: 'list' },
+      });
+      const wrap = element => renderToStaticMarkup(createElement(MemoryRouter, null, element));
+      const htmls = [
+        render('list'),
+        wrap(
+          createElement(VideoCollection, {
+            videos: data.videos,
+            view: 'list',
+            bulk: false,
+            refresh() {},
+          }),
+        ),
+        wrap(createElement(PlaylistList, { playlists: data.playlists, refresh() {} })),
+        wrap(
+          createElement(
+            Collection,
+            { grid: false },
+            createElement(DownloadItem, { download: data.queue[0], refresh() {} }),
+          ),
+        ),
+      ];
+      for (const html of htmls) {
+        assert.match(html, /<ul class="divide-y rounded-xl border"/);
+        assert.match(
+          html,
+          /<li class="flex min-w-0 flex-wrap items-center gap-3 p-2 sm:flex-nowrap"/,
+        );
+        assert.match(html, /flex h-10 w-16 items-center justify-center/);
+        assert.doesNotMatch(html, /data-slot="card"|aspect-video/);
+      }
+      Object.assign(useUserConfigStore.getInitialState(), {
+        userConfig: { ...userConfig, view_style_playlist: 'table' },
+      });
+      const table = wrap(createElement(PlaylistList, { playlists: data.playlists, refresh() {} }));
+      assert.match(table, /<table/);
+      assert.equal((table.match(/<tr\b/g) ?? []).length, data.playlists.length + 1);
+    });
     await t.test('subscription controls stay permission-gated across views', () => {
       for (const view of ['grid', 'list', 'table']) {
         setAccount({ is_staff: false, is_superuser: false });

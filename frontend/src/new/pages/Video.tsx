@@ -1,3 +1,4 @@
+import { Collection, CollectionImage, CollectionItem } from '../components/Collection';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import loadVideoById, { type VideoResponseType } from '../../api/loader/loadVideoById';
@@ -241,68 +242,68 @@ export default function Video() {
           )}
           <section className="space-y-3" aria-label="Similar videos">
             <h2 className="text-xl font-semibold">Similar videos</h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <Collection grid>
               {similar.map(item => (
-                <Card key={item.youtube_id}>
-                  <Link to={Routes.Video(item.youtube_id)}>
-                    <img
-                      className="aspect-video w-full rounded-t-xl object-cover"
-                      src={playerMediaUrl(item.vid_thumb_url, getApiUrl())}
-                      alt=""
-                    />
-                    <CardHeader>
-                      <CardTitle className="text-base">{item.title}</CardTitle>
-                    </CardHeader>
-                  </Link>
-                  <CardContent>
-                    <Link
-                      className="text-sm text-muted-foreground hover:underline"
-                      to={Routes.Channel(item.channel.channel_id)}
-                    >
-                      {item.channel.channel_name}
+                <CollectionItem
+                  key={item.youtube_id}
+                  media={
+                    <Link to={Routes.Video(item.youtube_id)} aria-label={`Play ${item.title}`}>
+                      <CollectionImage src={playerMediaUrl(item.vid_thumb_url, getApiUrl())} />
                     </Link>
-                    <p className="text-sm">
-                      {item.player.duration_str} · {item.stats.view_count.toLocaleString()} views ·{' '}
-                      {item.player.watched ? 'Watched' : 'Unwatched'}
-                    </p>
-                    <p className="text-sm text-muted-foreground">{isoDate(item.published)}</p>
-                    <Progress
-                      value={Math.min(100, Math.max(0, item.player.progress || 0))}
-                      aria-label="Watch progress"
-                    />
-                    <div className="mt-3 flex flex-wrap gap-2">
+                  }
+                  title={
+                    <Link to={Routes.Video(item.youtube_id)} title={item.title}>
+                      {item.title}
+                    </Link>
+                  }
+                >
+                  <Link
+                    className="text-sm text-muted-foreground hover:underline"
+                    to={Routes.Channel(item.channel.channel_id)}
+                  >
+                    {item.channel.channel_name}
+                  </Link>
+                  <p className="text-sm">
+                    {item.player.duration_str} · {item.stats.view_count.toLocaleString()} views ·{' '}
+                    {item.player.watched ? 'Watched' : 'Unwatched'}
+                  </p>
+                  <p className="text-sm text-muted-foreground">{isoDate(item.published)}</p>
+                  <Progress
+                    value={Math.min(100, Math.max(0, item.player.progress || 0))}
+                    aria-label="Watch progress"
+                  />
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      disabled={similarPending}
+                      onClick={() =>
+                        void mutateSimilar(() =>
+                          updateWatchedState({
+                            id: item.youtube_id,
+                            is_watched: !item.player.watched,
+                          }),
+                        )
+                      }
+                    >
+                      {item.player.watched ? 'Mark unwatched' : 'Mark watched'}
+                    </Button>
+                    {Boolean(item.player.progress) && (
                       <Button
                         variant="outline"
                         disabled={similarPending}
-                        onClick={() =>
-                          void mutateSimilar(() =>
-                            updateWatchedState({
-                              id: item.youtube_id,
-                              is_watched: !item.player.watched,
-                            }),
-                          )
-                        }
+                        onClick={event => {
+                          clearProgressTrigger.current = event.currentTarget;
+                          setClearProgressError('');
+                          setClearProgressTarget(item.youtube_id);
+                        }}
                       >
-                        {item.player.watched ? 'Mark unwatched' : 'Mark watched'}
+                        Delete watch progress
                       </Button>
-                      {Boolean(item.player.progress) && (
-                        <Button
-                          variant="outline"
-                          disabled={similarPending}
-                          onClick={event => {
-                            clearProgressTrigger.current = event.currentTarget;
-                            setClearProgressError('');
-                            setClearProgressTarget(item.youtube_id);
-                          }}
-                        >
-                          Delete watch progress
-                        </Button>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
+                    )}
+                  </div>
+                </CollectionItem>
               ))}
-            </div>
+            </Collection>
           </section>
           <section className="space-y-4" aria-label="Comments">
             <h2 className="text-xl font-semibold">

@@ -2,6 +2,7 @@ import APIClient from '../../functions/APIClient';
 import type { AppSettingsConfigType } from '../../api/loader/loadAppsettingsConfig';
 import type { SnapshotListType } from '../../api/loader/loadSnapshots';
 import type { CookieStateType } from '../../api/loader/loadCookie';
+import { useAppSettingsStore } from '../../stores/AppSettingsStore';
 
 type ApiResponse<T> = { status: number; data?: T; error?: { error?: string } };
 export function requireData<T>(response: ApiResponse<T>, name: string): T {
@@ -130,6 +131,6 @@ export async function saveApplicationSetting(
     method: 'POST',
     body: { [group]: { [key]: value } },
   });
-  if (response.status < 200 || response.status >= 300 || response.error)
-    throw new Error(response.error?.error || `Save failed (${response.status})`);
+  const config = validateAppSettings(requireData(response, 'Save'));
+  useAppSettingsStore.getState().setAppSettingsConfig(config);
 }

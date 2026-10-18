@@ -30,6 +30,7 @@ import {
 } from '../lib/download';
 import { nextPage } from '../pagination';
 import { DownloadItem } from '../components/DownloadItem';
+import { Collection } from '../components/Collection';
 import TaskNotifications from '../components/TaskNotifications';
 
 import type { DownloadResponseType } from '../lib/download';
@@ -596,13 +597,7 @@ export function Download() {
       {queueReady && list.length === 0 && !queueError && (
         <p className="py-8 text-center text-sm text-muted-foreground">No downloads found.</p>
       )}
-      <div
-        className={
-          userConfig.view_style_downloads === ViewStylesEnum.Grid
-            ? `grid grid-cols-1 gap-2 sm:grid-cols-2 ${({ 3: 'lg:grid-cols-3', 4: 'lg:grid-cols-4', 5: 'lg:grid-cols-5', 6: 'lg:grid-cols-6', 7: 'lg:grid-cols-7' } as Record<number, string>)[userConfig.grid_items] || 'lg:grid-cols-3'}`
-            : 'space-y-2'
-        }
-      >
+      <Collection grid={userConfig.view_style_downloads === 'grid'}>
         {list.map(item => (
           <DownloadItem
             key={`${item.channel_id}_${item.timestamp}_${item.youtube_id}`}
@@ -611,7 +606,7 @@ export function Download() {
             refresh={refreshList}
           />
         ))}
-      </div>
+      </Collection>
       {pagination && (
         <nav
           aria-label="Download pages"

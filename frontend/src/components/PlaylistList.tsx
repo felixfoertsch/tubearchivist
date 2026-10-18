@@ -15,7 +15,8 @@ type PlaylistListProps = {
 
 const PlaylistList = ({ playlistList, setRefresh }: PlaylistListProps) => {
   const { userConfig } = useUserConfigStore();
-  const viewStyle = userConfig.view_style_playlist;
+  const viewStyle =
+    userConfig.view_style_playlist === 'table' ? 'list' : userConfig.view_style_playlist;
 
   if (!playlistList) {
     return <LoadingIndicator />;

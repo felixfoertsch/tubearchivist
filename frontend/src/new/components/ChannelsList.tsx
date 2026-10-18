@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { collectionBody, collectionCard, collectionGrid } from './collectionLayout';
+import { Collection, CollectionImage, CollectionItem } from './Collection';
 import { Link } from 'react-router-dom';
 import updateChannelSubscription from '../../api/actions/updateChannelSubscription';
 import useIsAdmin from '../../functions/useIsAdmin';
@@ -7,7 +7,6 @@ import type { ChannelType } from '../../pages/Channels';
 import { useUserConfigStore } from '../../stores/UserConfigStore';
 import NewRoutes from '../routes';
 import { Button } from '../ui/button';
-import { Card } from '../ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { assertResponse, errorMessage, isoDate } from '../videoMetadata';
 
@@ -19,9 +18,7 @@ export function ChannelsList({
   refresh: () => void;
 }) {
   const admin = Boolean(useIsAdmin());
-  const { view_style_channel: view, grid_items: columns } = useUserConfigStore(
-    state => state.userConfig,
-  );
+  const { view_style_channel: view } = useUserConfigStore(state => state.userConfig);
   const rows = channels.map(channel => (
     <ChannelCard
       key={channel.channel_id}
@@ -50,16 +47,7 @@ export function ChannelsList({
       </Table>
     );
   }
-  return view === 'grid' ? (
-    <div
-      className={collectionGrid}
-      style={{ ['--home-columns' as string]: Math.min(7, Math.max(3, columns)) }}
-    >
-      {rows}
-    </div>
-  ) : (
-    <ul className="divide-y rounded-xl border">{rows}</ul>
-  );
+  return <Collection grid={view === 'grid'}>{rows}</Collection>;
 }
 
 function ChannelCard({
@@ -145,37 +133,29 @@ function ChannelCard({
       </TableRow>
     );
   }
-  return view === 'grid' ? (
-    <Card className={collectionCard}>
-      <Link
-        to={NewRoutes.Channel(channel.channel_id)}
-        aria-label={`Open ${channel.channel_name}`}
-        className="shrink-0"
-      >
-        <img
-          className="aspect-video w-full object-cover"
-          src={channel.channel_thumb_url}
-          alt=""
-          loading="lazy"
-        />
-      </Link>
-      <div className={collectionBody}>
+  return (
+    <CollectionItem
+      compact={view !== 'grid'}
+      media={
         <Link
-          className="line-clamp-2 break-words text-sm font-semibold hover:underline"
           to={NewRoutes.Channel(channel.channel_id)}
-          title={channel.channel_name}
+          aria-label={`Open ${channel.channel_name}`}
         >
+          <CollectionImage src={channel.channel_thumb_url} compact={view !== 'grid'} avatar />
+        </Link>
+      }
+      title={
+        <Link to={NewRoutes.Channel(channel.channel_id)} title={channel.channel_name}>
           {channel.channel_name}
         </Link>
-        <p className="text-xs text-muted-foreground">Subscribers: {subscribers}</p>
-        <p className="text-xs text-muted-foreground">Last refreshed: {refreshed}</p>
-        {action}
-      </div>
-    </Card>
-  ) : (
-    <li className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 p-2 sm:flex-nowrap">
-      <div className="min-w-0 flex-1 basis-40">{identity}</div>
-      {action}
-    </li>
+      }
+      metadata={
+        <>
+          <span>Subscribers: {subscribers}</span>
+          <span>Last refreshed: {refreshed}</span>
+        </>
+      }
+      actions={action}
+    />
   );
 }
