@@ -2,7 +2,6 @@ import { useConfirm } from '../components/useConfirm';
 import { useEffect, useState } from 'react';
 import type { BackupListType } from '../../api/loader/loadBackupList';
 import useIsAdmin from '../../functions/useIsAdmin';
-import SettingsFrame from '../components/SettingsFrame';
 import { requestJson, settingsError } from '../lib/settings';
 import { backupDate } from '../lib/settingsBackup';
 import { Button } from '../ui/button';
@@ -31,7 +30,7 @@ function Action({
   return (
     <Card className="gap-3 p-4">
       {dialog}
-      <h2 className="font-semibold">{title}</h2>
+      <h3 className="font-semibold">{title}</h3>
       <p className="text-sm text-muted-foreground">{help}</p>
       <form
         className="space-y-3"
@@ -156,7 +155,7 @@ function Actions() {
         />
       </div>
       <Card className="gap-3 p-4">
-        <h2 className="font-semibold">Restore ZIP backup</h2>
+        <h3 className="font-semibold">Restore ZIP backup</h3>
         <p className="text-sm">
           Restore replaces current index with selected backup from cache/backup.
         </p>
@@ -235,5 +234,5 @@ function Actions() {
 }
 export default function SettingsActions() {
   const admin = useIsAdmin();
-  return <SettingsFrame title="Archive actions">{admin && <Actions />}</SettingsFrame>;
+  return admin ? <Actions /> : null;
 }

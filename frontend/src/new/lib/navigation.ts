@@ -1,7 +1,7 @@
 import NewRoutes from '../routes';
 
 const knownPath =
-  /^\/new\/(?:$|channel\/(?:[\w-]+(?:\/(?:streams\/|shorts\/|playlist\/|about\/)?)?)?$|playlist\/(?:[\w-]+\/?)?$|video\/[\w-]+\/?$|(?:downloads|search|about)\/?$|settings\/(?:user\/|application\/|scheduling\/|actions\/)?$)/;
+  /^\/new\/(?:$|channel\/(?:[\w-]+(?:\/(?:streams\/|shorts\/|playlist\/|about\/)?)?)?$|playlist\/(?:[\w-]+\/?)?$|video\/[\w-]+\/?$|(?:downloads|search|dashboard)\/?$|settings\/(?:user\/|application\/|scheduling\/|actions\/)?$)/;
 
 /** Accept known new UI routes only, never protocols, traversal or encoded separators. */
 export function safeReturnTo(value: string | null): string {
@@ -30,5 +30,16 @@ export function loginHref(value: string): string {
 export function classicHref(value: string): string {
   if (value.split(/[?#]/, 1)[0] === NewRoutes.Login) return '/login/';
   const safe = safeReturnTo(value);
-  return safe === value ? value.slice(4) : '/';
+  if (safe !== value) return '/';
+  const url = new URL(safe, 'https://return.invalid');
+  if (/^\/new\/dashboard\/?$/.test(url.pathname)) return `/settings/${url.search}`;
+  if (/^\/new\/settings\/?$/.test(url.pathname)) {
+    const section = ['user', 'application', 'scheduling', 'actions'].includes(url.hash.slice(1))
+      ? url.hash.slice(1)
+      : 'user';
+    return `/settings/${section}/${url.search}`;
+  }
+  if (/^\/new\/settings\/(user|application|scheduling|actions)\/$/.test(url.pathname))
+    return `${url.pathname.slice(4)}${url.search}`;
+  return value.slice(4);
 }

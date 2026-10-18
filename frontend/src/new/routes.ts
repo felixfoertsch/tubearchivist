@@ -15,16 +15,16 @@ const NewRoutes = {
   DownloadsByChannelId: (id: string) => `/new/downloads/?channel=${segment(id)}&ignored=false`,
   IgnoredByChannelId: (id: string) => `/new/downloads/?channel=${segment(id)}&ignored=true`,
   Search: '/new/search/',
-  SettingsDashboard: '/new/settings/',
-  SettingsUser: '/new/settings/user/',
-  SettingsApplication: '/new/settings/application/',
-  SettingsScheduling: '/new/settings/scheduling/',
-  SettingsActions: '/new/settings/actions/',
+  Dashboard: '/new/dashboard/',
+  Settings: '/new/settings/',
+  SettingsUser: '/new/settings/#user',
+  SettingsApplication: '/new/settings/#application',
+  SettingsScheduling: '/new/settings/#scheduling',
+  SettingsActions: '/new/settings/#actions',
   Login: '/new/login/',
   Video: (id: string) => `/new/video/${segment(id)}`,
   VideoAtTimestamp: (id: string, timestamp: string) =>
     `/new/video/${segment(id)}/?t=${segment(timestamp)}`,
-  About: '/new/about/',
 };
 
 export default NewRoutes;

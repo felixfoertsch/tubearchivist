@@ -37,6 +37,25 @@ test('known new routes preserve query and hash; classic escape matches route', (
   assert.equal(classicHref('/new/login/'), '/login/');
   assert.equal(routes.Video('a/b?c'), '/new/video/a%2Fb%3Fc');
   assert.equal(routes.VideoAtTimestamp('a', '1&x=2'), '/new/video/a/?t=1%26x%3D2');
+  assert.equal(routes.Dashboard, '/new/dashboard/');
+  assert.equal(routes.Settings, '/new/settings/');
+  assert.equal(safeReturnTo('/new/dashboard/'), '/new/dashboard/');
+  for (const section of ['user', 'application', 'scheduling', 'actions']) {
+    const path = `/new/settings/?tab=advanced#${section}`;
+    assert.equal(safeReturnTo(path), path);
+    assert.equal(classicHref(path), `/settings/${section}/?tab=advanced`);
+  }
+  assert.equal(classicHref('/new/dashboard/?tab=1'), '/settings/?tab=1');
+  assert.equal(classicHref('/new/dashboard'), '/settings/');
+  assert.equal(classicHref('/new/settings/?tab=1'), '/settings/user/?tab=1');
+  for (const section of ['user', 'application', 'scheduling', 'actions']) {
+    const path = `/new/settings/${section}/?tab=advanced#legacy`;
+    assert.equal(safeReturnTo(path), path);
+    assert.equal(classicHref(path), `/settings/${section}/?tab=advanced`);
+  }
+  assert.equal(safeReturnTo('/new/about/'), '/new/');
+  assert.equal(classicHref('/new/about/'), '/');
+  assert.equal(safeReturnTo('/new/channel/UC123/about/'), '/new/channel/UC123/about/');
 });
 
 test('return rejects external URLs, unknown routes, traversal and encoded separators', () => {

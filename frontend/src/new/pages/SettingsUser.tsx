@@ -3,7 +3,6 @@ import useIsAdmin from '../../functions/useIsAdmin';
 import { ColourConstant, FileSizeUnits } from '../../api/actions/updateUserConfig';
 import type { ColourVariants, UserConfigType } from '../../api/actions/updateUserConfig';
 import { useUserConfigStore } from '../../stores/UserConfigStore';
-import SettingsFrame from '../components/SettingsFrame';
 import { SettingsUserSection } from '../components/SettingsUserSections';
 import { pageSizePayload, saveUserSettings } from '../lib/settingsUser';
 import { settingsError } from '../lib/settings';
@@ -52,7 +51,7 @@ export default function SettingsUser() {
     parsedPageSize <= Number.MAX_SAFE_INTEGER;
   const dirty = currentPageSize !== String(userConfig.page_size);
   return (
-    <SettingsFrame title="User settings" admin={false}>
+    <>
       <p className="text-sm text-muted-foreground">
         Personal interface preferences. Save each choice to apply it to your account.
       </p>
@@ -175,6 +174,6 @@ export default function SettingsUser() {
           </Button>
         </SettingsUserSection>
       )}
-    </SettingsFrame>
+    </>
   );
 }

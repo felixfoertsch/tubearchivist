@@ -42,12 +42,8 @@ import Playlist from './pages/Playlist';
 import Search from './pages/Search';
 import Download from './pages/Download';
 import SettingsDashboard from './pages/SettingsDashboard';
-import SettingsUser from './pages/SettingsUser';
-import SettingsApplication from './pages/SettingsApplication';
-import SettingsScheduling from './pages/SettingsScheduling';
-import SettingsActions from './pages/SettingsActions';
 import Login from './pages/Login';
-import About from './pages/About';
+import Settings from './pages/Settings';
 import NotFound from './pages/NotFound';
 import ErrorPage from './pages/ErrorPage';
 import './style.css';
@@ -103,8 +99,8 @@ function App() {
     ['Playlists', NewRoutes.Playlists],
     ...(isAdmin ? [['Downloads', NewRoutes.Downloads]] : []),
     ['Search', NewRoutes.Search],
-    ['Settings', NewRoutes.SettingsDashboard],
-    ['About', NewRoutes.About],
+    ['Dashboard', NewRoutes.Dashboard],
+    ['Settings', NewRoutes.Settings],
   ];
   const navigation = links.map(([label, href]) => (
     <NavLink
@@ -182,7 +178,9 @@ function App() {
               {theme === 'system' ? 'System' : theme === 'dark' ? 'Dark' : 'Light'}
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <a href={classicHref(location.pathname + location.search)}>Classic UI</a>
+              <a href={classicHref(location.pathname + location.search + location.hash)}>
+                Classic UI
+              </a>
             </Button>
             <Button variant="ghost" size="sm" disabled={loggingOut} onClick={logout}>
               Logout
@@ -197,51 +195,11 @@ function App() {
       <footer className="mx-auto flex max-w-screen-2xl flex-wrap gap-3 border-t p-4 text-sm">
         <span>TubeArchivist {auth?.version}</span>
         {auth?.ta_update?.version && (
-          <a
-            className="underline"
-            href={`https://github.com/tubearchivist/tubearchivist/releases/tag/${encodeURIComponent(auth.ta_update.version)}`}
-            target="_blank"
-            rel="noreferrer"
-          >
+          <span>
             {auth.ta_update.version} available
             {auth.ta_update.is_breaking ? ' — Breaking changes' : ''}
-          </a>
+          </span>
         )}
-        <Link className="underline" to={NewRoutes.About}>
-          About
-        </Link>
-        <a
-          className="underline"
-          href="https://github.com/tubearchivist/tubearchivist"
-          target="_blank"
-          rel="noreferrer"
-        >
-          GitHub
-        </a>
-        <a
-          className="underline"
-          href="https://hub.docker.com/r/bbilly1/tubearchivist"
-          target="_blank"
-          rel="noreferrer"
-        >
-          Docker Hub
-        </a>
-        <a
-          className="underline"
-          href="https://www.tubearchivist.com/discord"
-          target="_blank"
-          rel="noreferrer"
-        >
-          Discord
-        </a>
-        <a
-          className="underline"
-          href="https://www.reddit.com/r/TubeArchivist/"
-          target="_blank"
-          rel="noreferrer"
-        >
-          Reddit
-        </a>
       </footer>
     </>
   );
@@ -276,12 +234,12 @@ const router = createBrowserRouter([
           { path: 'playlist/:playlistId', element: <Playlist /> },
           { path: 'search', element: <Search /> },
           { path: 'downloads', element: <Download /> },
-          { path: 'settings', element: <SettingsDashboard /> },
-          { path: 'settings/user', element: <SettingsUser /> },
-          { path: 'settings/application', element: <SettingsApplication /> },
-          { path: 'settings/scheduling', element: <SettingsScheduling /> },
-          { path: 'settings/actions', element: <SettingsActions /> },
-          { path: 'about/', element: <About /> },
+          { path: 'dashboard', element: <SettingsDashboard /> },
+          { path: 'settings', element: <Settings /> },
+          { path: 'settings/user', loader: () => redirect('/new/settings/#user') },
+          { path: 'settings/application', loader: () => redirect('/new/settings/#application') },
+          { path: 'settings/scheduling', loader: () => redirect('/new/settings/#scheduling') },
+          { path: 'settings/actions', loader: () => redirect('/new/settings/#actions') },
           { path: '*', element: <NotFound /> },
         ],
       },
