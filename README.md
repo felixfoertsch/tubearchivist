@@ -1,3 +1,14 @@
+# Tube Archivist fork
+
+Independent hard fork of [Tube Archivist](https://github.com/tubearchivist/tubearchivist).
+`main` owns application source, tests, packaging, and CI. No patch replay or automatic upstream synchronization.
+
+Fork changes include runtime defaults, channel title filtering, simple-download metadata embedding, and bounded channel rolling windows. See [FORK.md](FORK.md) for behavior and deletion warnings.
+
+Images: `ghcr.io/felixfoertsch/tubearchivist:nightly` follows validated `main` pushes. Published non-prerelease releases publish their exact tag, `stable`, and `latest`. These are unofficial fork images, not upstream releases. Upstream documentation below remains for reference; its registry links and `deploy.sh` are not fork publication instructions.
+
+---
+
 ![Tube Archivist](assets/tube-archivist-front.jpg?raw=true "Tube Archivist Banner")
 [*more screenshots and video*](SHOWCASE.MD)
 

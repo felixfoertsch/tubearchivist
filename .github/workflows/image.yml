@@ -1,0 +1,167 @@
+name: Validate and publish fork
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            backend/requirements.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libldap2-dev libsasl2-dev libssl-dev
+          python -m pip install -r requirements-dev.txt
+          npm ci --prefix frontend
+      - name: Validate source
+        run: |
+          node scripts/test-workflow.mjs
+          node --test frontend/tests/channel-rolling-window.mjs
+          pre-commit run --all-files
+          pytest backend
+          npm run --prefix frontend build
+          git diff --exit-code
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - name: Build without registry credentials
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          outputs: type=oci,dest=${{ runner.temp }}/candidate.tar
+          provenance: false
+          sbom: false
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+      - uses: actions/upload-artifact@v6
+        if: github.event_name != 'pull_request'
+        with:
+          name: image
+          path: ${{ runner.temp }}/candidate.tar
+          retention-days: 2
+
+  publish:
+    needs: build
+    if: github.repository == 'felixfoertsch/tubearchivist' && (github.event_name == 'push' || (github.event_name == 'release' && !github.event.release.prerelease))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: fork-image-publication
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # No checkout or source execution in this credential-bearing job.
+      - uses: actions/download-artifact@v7
+        with:
+          name: image
+          path: ${{ runner.temp }}/image
+      - name: Install registry transport
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+      - name: Validate candidate platforms and identity
+        env:
+          IMAGE: oci-archive:${{ runner.temp }}/image/candidate.tar
+          SOURCE: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          skopeo inspect --raw "$IMAGE" | jq -e '[.manifests[].platform | .os + "/" + .architecture] | sort == ["linux/amd64", "linux/arm64"]'
+          for arch in amd64 arm64; do
+            skopeo inspect --config --override-arch "$arch" "$IMAGE" | jq -e --arg sha "$GITHUB_SHA" --arg source "$SOURCE" '.config.Labels["org.opencontainers.image.revision"] == $sha and .config.Labels["org.opencontainers.image.source"] == $source'
+          done
+      - name: Publish guarded image
+        uses: actions/github-script@v8
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ARCHIVE: oci-archive:${{ runner.temp }}/image/candidate.tar
+        with:
+          script: |
+            const {execFileSync} = require('node:child_process');
+            const {owner, repo} = context.repo;
+            const image = 'ghcr.io/felixfoertsch/tubearchivist';
+            const transport = (...args) => execFileSync('skopeo', args, {encoding: 'utf8'});
+            if (`${owner}/${repo}` !== 'felixfoertsch/tubearchivist') throw new Error('Unexpected repository');
+            async function commit(ref) {
+              let {data} = await github.rest.git.getRef({owner, repo, ref});
+              let object = data.object;
+              for (let depth = 0; object.type === 'tag' && depth < 10; depth++) {
+                ({data: {object}} = await github.rest.git.getTag({owner, repo, tag_sha: object.sha}));
+              }
+              if (object.type !== 'commit') throw new Error('Not a commit');
+              return object.sha;
+            }
+            async function guard() {
+              if (context.eventName === 'push' && context.ref === 'refs/heads/main') {
+                if (await commit('heads/main') !== context.sha) throw new Error('Stale main');
+                return 'nightly';
+              }
+              if (context.eventName !== 'release') throw new Error('Not a publication event');
+              const release = context.payload.release;
+              if (release.draft || release.prerelease) throw new Error('Not a stable release');
+              const tag = release.tag_name;
+              if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(tag) || ['nightly', 'stable', 'latest'].includes(tag)) throw new Error('Invalid release image tag');
+              if (await commit(`tags/${tag}`) !== context.sha) throw new Error('Release tag moved');
+              const {data: current} = await github.rest.repos.getRelease({owner, repo, release_id: release.id});
+              const {data: latest} = await github.rest.repos.getLatestRelease({owner, repo});
+              if (current.draft || current.prerelease || current.tag_name !== tag || latest.id !== release.id) throw new Error('Stale release');
+              return tag;
+            }
+            const tag = await guard();
+            execFileSync('skopeo', ['login', 'ghcr.io', '--username', context.actor, '--password-stdin'], {input: process.env.GITHUB_TOKEN});
+            const release = context.eventName === 'release';
+            const candidate = release ? tag : `build-${context.runId}-${process.env.GITHUB_RUN_ATTEMPT}`;
+            const {Digest: candidateDigest} = JSON.parse(transport('inspect', process.env.ARCHIVE));
+            if (!/^sha256:[a-f0-9]{64}$/.test(candidateDigest)) throw new Error('Invalid candidate digest');
+            let existing;
+            // Fail closed unless registry explicitly reports an absent manifest.
+            try {
+              existing = JSON.parse(transport('inspect', `docker://${image}:${candidate}`));
+            } catch (error) {
+              const stderr = String(error.stderr || '');
+              if (!/manifest unknown|manifest_unknown|StatusCode: 404/.test(stderr)) throw error;
+            }
+            if (existing && (!release || existing.Digest !== candidateDigest)) throw new Error('Image tag already exists with different bytes; refusing overwrite');
+            if (!existing) transport('copy', '--all', '--preserve-digests', process.env.ARCHIVE, `docker://${image}:${candidate}`);
+            const raw = JSON.parse(transport('inspect', '--raw', `docker://${image}:${candidate}`));
+            const platforms = raw.manifests.map(({platform: p}) => `${p.os}/${p.architecture}`).sort();
+            if (JSON.stringify(platforms) !== JSON.stringify(['linux/amd64', 'linux/arm64'])) throw new Error('Unexpected platforms');
+            for (const arch of ['amd64', 'arm64']) {
+              const config = JSON.parse(transport('inspect', '--config', '--override-arch', arch, `docker://${image}:${candidate}`));
+              if (config.config.Labels['org.opencontainers.image.revision'] !== context.sha || config.config.Labels['org.opencontainers.image.source'] !== `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}`) throw new Error('Image identity mismatch');
+            }
+            const {Digest: digest} = JSON.parse(transport('inspect', `docker://${image}:${candidate}`));
+            if (digest !== candidateDigest) throw new Error('Candidate digest mismatch');
+            for (const alias of release ? ['stable', 'latest'] : ['nightly']) {
+              await guard();
+              transport('copy', '--all', '--preserve-digests', `docker://${image}@${digest}`, `docker://${image}:${alias}`);
+              await guard();
+              const {Digest: published} = JSON.parse(transport('inspect', `docker://${image}:${alias}`));
+              if (published !== digest) throw new Error('Alias digest mismatch');
+            }
+          github-token: ${{ github.token }}
