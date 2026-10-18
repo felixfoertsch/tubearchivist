@@ -64,7 +64,7 @@ export type VideoType = {
   channel: ChannelType;
   date_downloaded: number;
   description: string;
-  comment_count?: number;
+  comment_count?: number | null;
   media_size: number;
   media_url: string;
   player: PlayerType;

@@ -11,6 +11,7 @@ import updateCustomPlaylist from '../../api/actions/updateCustomPlaylist';
 import humanFileSize from '../../functions/humanFileSize';
 import { FileSizeUnits } from '../../api/actions/updateUserConfig';
 import VideoCard from './VideoCard';
+import { collectionGrid } from './collectionLayout';
 import { togglePageSelection } from './BulkSelection';
 import { errorMessage, assertResponse } from '../videoMetadata';
 import { Button } from '../ui/button';
@@ -258,11 +259,7 @@ export function VideoCollection({
         </div>
       ) : (
         <div
-          className={
-            style === 'grid'
-              ? 'grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-[repeat(var(--home-columns),minmax(0,1fr))]'
-              : 'flex flex-col gap-3'
-          }
+          className={style === 'grid' ? collectionGrid : 'flex flex-col gap-3'}
           style={{ ['--home-columns' as string]: Math.min(7, Math.max(3, userConfig.grid_items)) }}
         >
           {videos.map(video => (

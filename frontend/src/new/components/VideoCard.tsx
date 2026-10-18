@@ -1,4 +1,5 @@
 import { useConfirm } from './useConfirm';
+import { collectionBody, collectionCard } from './collectionLayout';
 import { useState } from 'react';
 import NewRoutes from '../routes';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -64,7 +65,7 @@ export default function VideoCard({
   };
   const href = NewRoutes.Video(video.youtube_id);
   return (
-    <Card className={`gap-0 overflow-hidden py-0 ${compact ? 'flex-row' : ''}`}>
+    <Card className={`${collectionCard} ${compact ? 'flex-row' : ''}`}>
       {dialog}
       <Link to={href} onClick={playInline} aria-label={`Play ${video.title}`} className="shrink-0">
         <img
@@ -74,7 +75,7 @@ export default function VideoCard({
           loading="lazy"
         />
       </Link>
-      <div className="min-w-0 flex-1 space-y-1 p-2">
+      <div className={compact ? 'min-w-0 flex-1 space-y-1 p-2' : collectionBody}>
         {selection}
         <Link className="line-clamp-2 text-sm font-semibold hover:underline" to={href}>
           {video.title}
