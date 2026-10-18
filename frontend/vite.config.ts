@@ -1,11 +1,14 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react-swc';
 import checker from 'vite-plugin-checker';
+import tailwindcss from '@tailwindcss/vite';
+import { fileURLToPath, URL } from 'node:url';
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react(), checker({ typescript: true })],
+  plugins: [react(), tailwindcss(), checker({ typescript: true })],
   base: '/',
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   server: {
     host: true,
     port: 3000,
@@ -19,6 +22,7 @@ export default defineConfig({
     assetsDir: 'assets',
     manifest: true,
     rollupOptions: {
+      input: { classic: 'index.html', new: 'new/index.html' },
       output: {
         entryFileNames: 'assets/[name].[hash].js',
         chunkFileNames: 'assets/[name].[hash].js',

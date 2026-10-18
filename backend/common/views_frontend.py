@@ -50,6 +50,19 @@ def django_static(_request, asset_path: str):
 
 
 @require_safe
+def new_frontend_index(_request):
+    """Serve the separate Vite entry point at /new/."""
+    response = _serve_file(
+        FRONTEND_ROOT,
+        "new/index.html",
+        "no-store, no-cache, must-revalidate",
+    )
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    return response
+
+
+@require_safe
 def frontend_index(_request):
     """Serve the Vite entry point for root and client-side routes."""
     response = _serve_file(

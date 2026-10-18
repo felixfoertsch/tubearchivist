@@ -51,8 +51,13 @@ urlpatterns = [
         )
         for directory in ("assets", "css", "favicon", "font", "img")
     ],
+    path(
+        "new/",
+        views_frontend.new_frontend_index,
+        name="new-frontend",
+    ),
     re_path(
-        r"^(?!(?:api|admin|media|static)(?:/|$)).*$",
+        r"^(?!(?:api|admin|media|static|new)(?:/|$)).*$",
         views_frontend.frontend_index,
         name="frontend",
     ),
