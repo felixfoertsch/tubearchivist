@@ -41,6 +41,13 @@ class ImageIdentityTests(unittest.TestCase):
                             image.publish("oci-archive:candidate", "docker://image:identity")
                 self.assertEqual(len(writes), 1 if state == "absent" else 0)
 
+    def test_manifest_failure_projects_only_fixed_markers(self):
+        result = subprocess.CompletedProcess([], 1, b"", b'manifest unknown; synthetic-secret-token')
+        with patch.object(image, "run", return_value=result):
+            with self.assertRaisesRegex(RuntimeError, r'markers=\["manifest unknown"\]') as error:
+                image.manifest("docker://image:identity", missing_ok=True)
+        self.assertNotIn("synthetic-secret-token", str(error.exception))
+
     def test_workflow_stops_on_helper_failure_before_source_and_aliases(self):
         workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/downstream.yml").read_text()
         self.assertLess(workflow.index(".automation/image_identity.py"), workflow.index(".automation/source_refs.py"))

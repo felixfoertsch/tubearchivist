@@ -19,7 +19,9 @@ def manifest(location, missing_ok=False):
         error = result.stderr.decode(errors="replace")
         if missing_ok and re.search(r"(?:manifest unknown|name unknown):", error, re.IGNORECASE):
             return None
-        raise RuntimeError("Cannot verify immutable image manifest.")
+        # Project fixed markers only; registry stderr can contain credentials.
+        markers = [name for name in ("manifest unknown", "name unknown", "unauthorized", "denied", "timeout", "connection refused", "404", "403", "401") if name in error.lower()]
+        raise RuntimeError("Cannot verify immutable image manifest; markers=" + json.dumps(markers))
     value = json.loads(result.stdout)
     if not isinstance(value, dict) or value.get("schemaVersion") != 2:
         raise RuntimeError("Invalid immutable image manifest.")
