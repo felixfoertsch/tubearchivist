@@ -174,6 +174,7 @@ export function createPreviewServer({ dist = defaultDist, fixtureMedia } = {}) {
       failurePath: '',
       delayPath: '',
       taskMode: 'idle',
+      channelCount: 1,
     };
     actions = [];
     apiReads = [];
@@ -295,6 +296,13 @@ export function createPreviewServer({ dist = defaultDist, fixtureMedia } = {}) {
               (body.delayPath !== '' && !routes.some(([, re]) => re.test(body.delayPath))))
           )
             return send(400, { error: 'Invalid delay path' });
+          if (
+            body.channelCount !== undefined &&
+            (!Number.isInteger(body.channelCount) ||
+              body.channelCount < 1 ||
+              body.channelCount > 24)
+          )
+            return send(400, { error: 'Invalid channel count' });
           merge(state, body);
           return send(200, state);
         }
@@ -508,7 +516,7 @@ export function createPreviewServer({ dist = defaultDist, fixtureMedia } = {}) {
         const empty = state.mode === 'empty';
         const list = rows => {
           const page = Number(url.searchParams.get('page') || 0),
-            size = 1;
+            size = route[0] === 'channel-list' ? state.channelCount : 1;
           const from = page > 1 ? (page - 1) * size : 0;
           if (!Number.isInteger(page) || page < 0 || from >= 10000)
             throw new Error('Invalid fixture page');
@@ -655,12 +663,27 @@ export function createPreviewServer({ dist = defaultDist, fixtureMedia } = {}) {
             return send(
               200,
               list(
-                data.channel &&
-                  (!url.searchParams.has('filter') ||
-                    data.channel.channel_subscribed ===
-                      (url.searchParams.get('filter') === 'subscribed'))
-                  ? [data.channel]
-                  : [],
+                (data.channel
+                  ? Array.from({ length: state.channelCount }, (_, i) =>
+                      i === 0
+                        ? data.channel
+                        : {
+                            ...data.channel,
+                            channel_id: `${ids.channel}-${i}`,
+                            channel_name:
+                              i === 1
+                                ? `Long channel ${'UnbrokenTitle'.repeat(20)}`
+                                : `Preview channel ${i + 1}`,
+                            channel_subscribed: i % 2 === 0,
+                          },
+                    )
+                  : []
+                ).filter(
+                  channel =>
+                    !url.searchParams.has('filter') ||
+                    channel.channel_subscribed ===
+                      (url.searchParams.get('filter') === 'subscribed'),
+                ),
               ),
             );
           case 'channel':

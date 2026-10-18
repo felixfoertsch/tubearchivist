@@ -307,7 +307,7 @@ export default function Video() {
           <section className="space-y-4" aria-label="Comments">
             <h2 className="text-xl font-semibold">
               Comments
-              {current.comment_count !== undefined && `: ${current.comment_count.toLocaleString()}`}
+              {current.comment_count != null && `: ${current.comment_count.toLocaleString()}`}
             </h2>
             {current.comment_count === 0 && (
               <p className="text-muted-foreground">Video has no comments</p>

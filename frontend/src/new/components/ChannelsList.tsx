@@ -1,13 +1,15 @@
 import { useState } from 'react';
+import { collectionBody, collectionCard, collectionGrid } from './collectionLayout';
 import { Link } from 'react-router-dom';
 import updateChannelSubscription from '../../api/actions/updateChannelSubscription';
 import useIsAdmin from '../../functions/useIsAdmin';
 import type { ChannelType } from '../../pages/Channels';
+import { useUserConfigStore } from '../../stores/UserConfigStore';
+import NewRoutes from '../routes';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
-import { useUserConfigStore } from '../../stores/UserConfigStore';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { assertResponse, errorMessage, isoDate } from '../videoMetadata';
-import NewRoutes from '../routes';
 
 export function ChannelsList({
   channels,
@@ -17,17 +19,46 @@ export function ChannelsList({
   refresh: () => void;
 }) {
   const admin = Boolean(useIsAdmin());
-  const view = useUserConfigStore(state => state.userConfig.view_style_channel);
-  const grid =
-    view === 'grid'
-      ? 'grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
-      : 'flex flex-col gap-3';
-  return (
-    <div className={grid}>
-      {channels.map(channel => (
-        <ChannelCard key={channel.channel_id} channel={channel} refresh={refresh} admin={admin} />
-      ))}
+  const { view_style_channel: view, grid_items: columns } = useUserConfigStore(
+    state => state.userConfig,
+  );
+  const rows = channels.map(channel => (
+    <ChannelCard
+      key={channel.channel_id}
+      channel={channel}
+      refresh={refresh}
+      admin={admin}
+      view={view}
+    />
+  ));
+  if (view === 'table') {
+    return (
+      <Table className="table-fixed" aria-label="Channels">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Channel</TableHead>
+            <TableHead className="hidden w-32 sm:table-cell">Subscribers</TableHead>
+            <TableHead className="hidden w-36 sm:table-cell">Last refreshed</TableHead>
+            {admin && (
+              <TableHead className="w-28">
+                <span className="sr-only">Subscription</span>
+              </TableHead>
+            )}
+          </TableRow>
+        </TableHeader>
+        <TableBody>{rows}</TableBody>
+      </Table>
+    );
+  }
+  return view === 'grid' ? (
+    <div
+      className={collectionGrid}
+      style={{ ['--home-columns' as string]: Math.min(7, Math.max(3, columns)) }}
+    >
+      {rows}
     </div>
+  ) : (
+    <ul className="divide-y rounded-xl border">{rows}</ul>
   );
 }
 
@@ -35,10 +66,12 @@ function ChannelCard({
   channel,
   refresh,
   admin,
+  view,
 }: {
   channel: ChannelType;
   refresh: () => void;
   admin: boolean;
+  view: string;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -59,37 +92,90 @@ function ChannelCard({
       setPending(false);
     }
   };
-  return (
-    <Card className="gap-2 overflow-hidden p-0">
-      <Link to={NewRoutes.Channel(channel.channel_id)} aria-label={`Open ${channel.channel_name}`}>
+  const subscribers = new Intl.NumberFormat().format(channel.channel_subs);
+  const refreshed = isoDate(channel.channel_last_refresh);
+  const identity = (
+    <Link
+      className="flex min-h-10 min-w-0 items-center gap-3 rounded-sm hover:underline"
+      to={NewRoutes.Channel(channel.channel_id)}
+      title={channel.channel_name}
+    >
+      <img
+        className="size-10 shrink-0 rounded-full object-cover"
+        src={channel.channel_thumb_url}
+        alt=""
+        loading="lazy"
+      />
+      <div className="min-w-0 flex-1">
+        <h2 className="truncate text-sm font-semibold">{channel.channel_name}</h2>
+        <p className={`text-xs text-muted-foreground ${view === 'table' ? 'sm:hidden' : ''}`}>
+          <span>Subscribers: {subscribers}</span>
+          {' · '}
+          <span>Last refreshed: {refreshed}</span>
+        </p>
+      </div>
+    </Link>
+  );
+  const action = admin && (
+    <div className="shrink-0">
+      <Button
+        className="min-h-10"
+        variant={channel.channel_subscribed ? 'outline' : 'secondary'}
+        size="sm"
+        disabled={pending}
+        onClick={() => void toggle()}
+        aria-label={`${channel.channel_subscribed ? 'Unsubscribe from' : 'Subscribe to'} ${channel.channel_name}`}
+      >
+        {pending ? 'Saving…' : channel.channel_subscribed ? 'Unsubscribe' : 'Subscribe'}
+      </Button>
+      {error && (
+        <p className="max-w-48 whitespace-normal text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+  if (view === 'table') {
+    return (
+      <TableRow>
+        <TableCell className="whitespace-normal">{identity}</TableCell>
+        <TableCell className="hidden sm:table-cell">{subscribers}</TableCell>
+        <TableCell className="hidden sm:table-cell">{refreshed}</TableCell>
+        {admin && <TableCell className="text-right">{action}</TableCell>}
+      </TableRow>
+    );
+  }
+  return view === 'grid' ? (
+    <Card className={collectionCard}>
+      <Link
+        to={NewRoutes.Channel(channel.channel_id)}
+        aria-label={`Open ${channel.channel_name}`}
+        className="shrink-0"
+      >
         <img
           className="aspect-video w-full object-cover"
-          src={channel.channel_banner_url || channel.channel_thumb_url}
+          src={channel.channel_thumb_url}
           alt=""
+          loading="lazy"
         />
       </Link>
-      <div className="space-y-2 p-3">
-        <h2 className="font-semibold">
-          <Link className="hover:underline" to={NewRoutes.Channel(channel.channel_id)}>
-            {channel.channel_name}
-          </Link>
-        </h2>
-        <p className="text-sm">
-          Subscribers: {new Intl.NumberFormat().format(channel.channel_subs)} · Last refreshed:{' '}
-          {isoDate(channel.channel_last_refresh)}
-        </p>
-        {admin && (
-          <Button
-            variant={channel.channel_subscribed ? 'outline' : 'secondary'}
-            size="sm"
-            disabled={pending}
-            onClick={() => void toggle()}
-          >
-            {pending ? 'Saving…' : channel.channel_subscribed ? 'Unsubscribe' : 'Subscribe'}
-          </Button>
-        )}
-        {error && <p role="alert">{error}</p>}
+      <div className={collectionBody}>
+        <Link
+          className="line-clamp-2 break-words text-sm font-semibold hover:underline"
+          to={NewRoutes.Channel(channel.channel_id)}
+          title={channel.channel_name}
+        >
+          {channel.channel_name}
+        </Link>
+        <p className="text-xs text-muted-foreground">Subscribers: {subscribers}</p>
+        <p className="text-xs text-muted-foreground">Last refreshed: {refreshed}</p>
+        {action}
       </div>
     </Card>
+  ) : (
+    <li className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 p-2 sm:flex-nowrap">
+      <div className="min-w-0 flex-1 basis-40">{identity}</div>
+      {action}
+    </li>
   );
 }

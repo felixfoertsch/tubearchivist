@@ -99,9 +99,12 @@ export default function Channels() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">Channels</h1>
         {admin && (
-          <div className="flex flex-wrap gap-2">
+          <details className="max-w-full">
+            <summary className="cursor-pointer rounded-md border px-3 py-2 text-sm font-medium">
+              Subscribe to channels
+            </summary>
             <form
-              className="flex flex-wrap gap-2"
+              className="mt-2 flex flex-wrap items-start gap-2"
               onSubmit={e => {
                 e.preventDefault();
                 void subscribeMany();
@@ -122,7 +125,7 @@ export default function Channels() {
                 {pending ? 'Working…' : 'Subscribe'}
               </Button>
             </form>
-          </div>
+          </details>
         )}
       </header>
       {admin && <TaskNotifications key={count} pageName="all" onComplete={refresh} />}
