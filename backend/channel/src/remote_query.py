@@ -127,8 +127,8 @@ def get_last_channel_videos(
             obs["playlist_items"] = f":{limit_amount}:1"
 
         url = f"https://www.youtube.com/channel/{channel_id}/{vid_type}"
-        channel_query, _ = YtWrap(obs, config).extract(url)
-        if not channel_query:
+        channel_query, error = YtWrap(obs, config).extract(url)
+        if error or not channel_query:
             continue
 
         for entry in channel_query["entries"]:

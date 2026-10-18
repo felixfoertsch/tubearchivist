@@ -4,6 +4,7 @@ functionality:
 - handle yt-dlp errors
 """
 
+from contextlib import redirect_stderr
 from datetime import datetime
 from http import cookiejar
 from io import StringIO
@@ -131,17 +132,36 @@ class YtWrap:
 
         return text, None
 
+    def _rewind_cookie(self):
+        """Only wrapper-owned in-memory cookies have a shared cursor."""
+        cookie = self.obs.get("cookiefile")
+        if isinstance(cookie, StringIO):
+            cookie.seek(0)
+
+    def _extractor(self):
+        """Validate before context exit can retry loading an invalid cookie."""
+        self._rewind_cookie()
+        # Cookie loaders can print malformed lines containing secrets.
+        with redirect_stderr(StringIO()):
+            ydl = yt_dlp.YoutubeDL(self.obs)
+            if self.obs.get("cookiefile") is not None:
+                try:
+                    _ = ydl.cookiejar
+                except (cookiejar.LoadError, yt_dlp.utils.DownloadError):
+                    return None
+        return ydl
+
     def extract(self, url) -> tuple[dict | None, str | None]:
         """
         make extract request
         returns response, error
         """
-        with yt_dlp.YoutubeDL(self.obs) as ydl:
+        ydl = self._extractor()
+        if ydl is None:
+            return None, "Invalid cookie file"
+        with ydl:
             try:
                 response = ydl.extract_info(url)
-            except cookiejar.LoadError as err:
-                print(f"cookie file is invalid: {err}")
-                return None, str(err)
             except yt_dlp.utils.ExtractorError as err:
                 print(f"{url}: failed to extract: {err}, continue...")
                 return None, str(err)
@@ -158,6 +178,9 @@ class YtWrap:
                     raise ConnectionError(self.BOT_ERROR_LOG) from err
 
                 return None, str(err)
+            finally:
+                # yt-dlp truncates streams on save, but does not rewind them.
+                self._rewind_cookie()
 
         self._validate_cookie()
 

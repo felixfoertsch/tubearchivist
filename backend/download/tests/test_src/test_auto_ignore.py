@@ -94,6 +94,7 @@ def test_ignored_video_is_skipped_without_failing_queue(
         patch(f"{MODULE}.YoutubeVideo") as video,
         patch(f"{MODULE}.RedisQueue"),
         patch(f"{MODULE}.DownloadPostProcess"),
+        patch("download.src.rolling_window.reconcile_windows"),
     ):
         channel.return_value.get_overwrites.side_effect = [
             {"auto_ignore_filter": TITLE},

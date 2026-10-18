@@ -28,6 +28,22 @@ from video.src.constants import VideoTypeEnum
 from video.src.index import YoutubeVideo
 
 
+def delete_and_ignore(videos):
+    """Share watched-age deletion and its normal ignore-queue path."""
+    parsed_ids: list[ParsedURLType] = []
+    for video in videos:
+        YoutubeVideo(video["youtube_id"]).delete_media_file()
+        parsed_ids.append(
+            {
+                "type": "video",
+                "url": video["youtube_id"],
+                "vid_type": VideoTypeEnum(video["vid_type"]),
+            }
+        )
+    if parsed_ids:
+        PendingList(youtube_ids=parsed_ids).parse_url_list(status="ignore")
+
+
 class PendingIndex:
     """base class holding all export methods"""
 

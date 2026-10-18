@@ -22,8 +22,7 @@ from common.src.helper import (
     rand_sleep,
 )
 from common.src.ta_redis import RedisQueue
-from common.src.urlparser import ParsedURLType
-from download.src.queue import PendingList
+from download.src.queue import delete_and_ignore
 from download.src.queue_interact import PendingInteract
 from download.src.yt_dlp_base import YtWrap
 from playlist.src.index import YoutubePlaylist
@@ -98,6 +97,11 @@ class VideoDownloader(DownloaderBase):
             self._delete_from_pending(youtube_id)
             downloaded += 1
 
+        # Failed or stopped batches cannot grant destructive reconciliation.
+        if not failed and not self.task.is_stopped() and downloaded:
+            from download.src.rolling_window import reconcile_windows
+
+            reconcile_windows(self.config, self.task)
         # post processing
         DownloadPostProcess(self.task).run()
 
@@ -361,33 +365,21 @@ class DownloadPostProcess(DownloaderBase):
                 }
                 self._auto_delete_watched(data)
 
-    @staticmethod
-    def _auto_delete_watched(data) -> None:
+    def _auto_delete_watched(self, data) -> None:
         """delete watched videos after x days"""
         to_delete = IndexPaginate("ta_video", data).get_results()
         if not to_delete:
             return
 
-        for video in to_delete:
-            youtube_id = video["youtube_id"]
-            print(f"{youtube_id}: auto delete video")
-            YoutubeVideo(youtube_id).delete_media_file()
+        from download.src.rolling_window import owns_video
 
-        print("add deleted to ignore list")
-
-        parsed_ids: list[ParsedURLType] = []
-
-        for video_item in to_delete:
-            vid_type = getattr(VideoTypeEnum, video_item["vid_type"].upper())
-            parsed_ids.append(
-                {
-                    "type": "video",
-                    "url": video_item["youtube_id"],
-                    "vid_type": vid_type,
-                }
-            )
-
-        PendingList(youtube_ids=parsed_ids).parse_url_list(status="ignore")
+        delete_and_ignore(
+            [
+                video
+                for video in to_delete
+                if not owns_video(video, self.config)
+            ]
+        )
 
     def refresh_playlist(self) -> None:
         """match videos with playlists"""
