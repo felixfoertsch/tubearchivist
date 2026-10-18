@@ -50,8 +50,10 @@ def django_static(_request, asset_path: str):
 
 
 @require_safe
-def new_frontend_index(_request):
-    """Serve the separate Vite entry point at /new/."""
+def new_frontend_index(_request, route: str = ""):
+    """Serve the separate Vite entry point, including client-side 404s."""
+    if ".." in route.split("/") or "\\" in route:
+        raise Http404
     response = _serve_file(
         FRONTEND_ROOT,
         "new/index.html",

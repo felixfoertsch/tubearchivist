@@ -9,7 +9,7 @@ assert(workflow.includes('persist-credentials: false'));
 assert(workflow.includes("github.event_name != 'pull_request'"));
 assert(workflow.includes("!github.event.release.prerelease"));
 assert(workflow.includes('platforms: linux/amd64,linux/arm64'));
-assert(workflow.includes('npm run --prefix frontend build\n'));
+assert(workflow.includes('npm run --prefix frontend build\n          node --test frontend/tests/*.mjs\n'));
 assert(!workflow.includes('npm run --prefix frontend build:deploy'));
 const publisher = workflow.slice(workflow.indexOf('  publish:'));
 assert(!publisher.includes('actions/checkout'));

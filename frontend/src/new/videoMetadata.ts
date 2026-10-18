@@ -1,3 +1,38 @@
+export function currentResult<T extends { key: string }>(
+  result: T | undefined,
+  key: string,
+): T | undefined {
+  return result?.key === key ? result : undefined;
+}
+
+export function channelNumber(value: string, minimum = 0): number | null {
+  const input = value.trim();
+  if (!input) return null;
+  const number = Number(input);
+  if (
+    !/^\d+$/.test(input) ||
+    !Number.isSafeInteger(number) ||
+    number < minimum ||
+    number > 2147483647
+  )
+    throw new Error(`Enter a whole number from ${minimum}–2147483647, or leave blank to reset.`);
+  return number;
+}
+
+export function errorMessage(error: unknown, fallback: string): string {
+  return error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string'
+    ? error.message
+    : fallback;
+}
+
+export function assertResponse(response: { status: number; error?: { error: string } }) {
+  if (response.error || response.status < 200 || response.status >= 300)
+    throw new Error(response.error?.error ?? `Request failed (${response.status})`);
+}
+
 export function isoDate(value: string | number): string {
   if (/^\d{4}-\d{2}-\d{2}(?:T|$)/.test(String(value))) return String(value).slice(0, 10);
   // Video indexing stores either YYYY-MM-DD or a Unix timestamp in seconds.

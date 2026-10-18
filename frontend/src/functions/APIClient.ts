@@ -5,6 +5,7 @@ import logOut from '../api/actions/logOut';
 import getCookie from './getCookie';
 import Routes from '../configuration/routes/RouteList';
 import { useBackendStore } from '../stores/BackendStore';
+import { loginHref } from '../new/lib/navigation';
 
 export interface ApiClientOptions extends Omit<RequestInit, 'body'> {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -58,6 +59,16 @@ const APIClient = async <T>(
       status: response.status,
       message: data?.message || data?.error || 'An error occurred while processing the request.',
     } as ApiError;
+  }
+
+  if (window.location.pathname.startsWith('/new/')) {
+    if (response.status === 401) {
+      window.location.assign(loginHref(window.location.pathname + window.location.search));
+      throw new Error('Unauthorized: Redirecting to login.');
+    }
+    if (response.status === 403) {
+      return { status: 403, error: { error: 'Forbidden: Access denied.' } };
+    }
   }
 
   if (response.status === 401) {

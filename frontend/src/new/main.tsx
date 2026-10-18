@@ -1,6 +1,15 @@
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createBrowserRouter, RouterProvider, useLoaderData } from 'react-router-dom';
+import {
+  createBrowserRouter,
+  RouterProvider,
+  Outlet,
+  NavLink,
+  Link,
+  redirect,
+  useLocation,
+  type LoaderFunctionArgs,
+} from 'react-router-dom';
 import loadAuth from '../api/loader/loadAuth';
 import loadUserConfig from '../api/loader/loadUserConfig';
 import loadUserAccount from '../api/loader/loadUserAccount';
@@ -11,8 +20,10 @@ import { useUserConfigStore } from '../stores/UserConfigStore';
 import { useUserAccountStore } from '../stores/UserAccountStore';
 import { useAppSettingsStore } from '../stores/AppSettingsStore';
 import useIsAdmin from '../functions/useIsAdmin';
-import Routes from '../configuration/routes/RouteList';
 import type { AuthenticationType } from '../pages/Base';
+import NewRoutes from './routes';
+import { classicHref, loginHref } from './lib/navigation';
+import { applyTheme, readTheme } from './lib/theme';
 import { Button } from './ui/button';
 import {
   Sheet,
@@ -23,15 +34,33 @@ import {
   SheetTrigger,
 } from './ui/sheet';
 import Home from './Home';
+import Video from './pages/Video';
+import Channels from './pages/Channels';
+import Channel from './pages/Channel';
+import Playlists from './pages/Playlists';
+import Playlist from './pages/Playlist';
+import Search from './pages/Search';
+import Download from './pages/Download';
+import SettingsDashboard from './pages/SettingsDashboard';
+import SettingsUser from './pages/SettingsUser';
+import SettingsApplication from './pages/SettingsApplication';
+import SettingsScheduling from './pages/SettingsScheduling';
+import SettingsActions from './pages/SettingsActions';
+import Login from './pages/Login';
+import About from './pages/About';
+import NotFound from './pages/NotFound';
+import ErrorPage from './pages/ErrorPage';
 import './style.css';
 
-async function bootstrap() {
+applyTheme(readTheme());
+
+async function bootstrap({ request }: LoaderFunctionArgs) {
   const authResponse = await loadAuth();
   if (authResponse.status === 401 || authResponse.status === 403) {
-    window.location.replace('/login/?next=%2Fnew%2F');
-    return null;
+    const url = new URL(request.url);
+    return redirect(loginHref(url.pathname + url.search));
   }
-  if (!authResponse.ok) throw new Error('Unable to check session. Reload to retry.');
+  if (!authResponse.ok) throw new Error('Unable to check session.');
   const auth = (await authResponse.json()) as AuthenticationType;
   const [config, account, settings] = await Promise.all([
     loadUserConfig(),
@@ -39,8 +68,9 @@ async function bootstrap() {
     loadAppsettingsConfig(),
   ]);
   for (const response of [config, account, settings]) {
+    if (response.status === 403) throw new Response('Access denied', { status: 403 });
     if (response.status < 200 || response.status >= 300 || response.error || !response.data)
-      throw new Error('Unable to load account preferences. Reload to retry.');
+      throw new Error('Unable to load account preferences.');
   }
   useAuthStore.getState().setAuth(auth);
   useUserConfigStore.getState().setUserConfig(config.data!);
@@ -49,67 +79,59 @@ async function bootstrap() {
   return true;
 }
 
-function App() {
-  const ready = useLoaderData();
-  const isAdmin = useIsAdmin();
-  const [error, setError] = useState('');
-  const [loggingOut, setLoggingOut] = useState(false);
-  const [theme, setTheme] = useState(() => {
-    try {
-      return localStorage.getItem('ta-new-theme') || 'system';
-    } catch {
-      return 'system';
-    }
-  });
+function ThemeRoot() {
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)');
-    const apply = () =>
-      document.documentElement.classList.toggle(
-        'dark',
-        theme === 'dark' || (theme === 'system' && media.matches),
-      );
-    apply();
-    media.addEventListener('change', apply);
-    try {
-      localStorage.setItem('ta-new-theme', theme);
-    } catch {
-      /* Storage can be disabled. */
-    }
-    return () => media.removeEventListener('change', apply);
-  }, [theme]);
-  if (!ready) return <p role="status">Redirecting to login…</p>;
+    const update = () => applyTheme(readTheme());
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  return <Outlet />;
+}
+
+function App() {
+  const isAdmin = useIsAdmin();
+  const auth = useAuthStore(state => state.auth);
+  const location = useLocation();
+  const [error, setError] = useState('');
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [theme, setTheme] = useState(readTheme);
   const links = [
-    ['Home', '/new/'],
-    ['Channels', Routes.Channels],
-    ['Playlists', Routes.Playlists],
-    ...(isAdmin ? [['Downloads', Routes.Downloads]] : []),
-    ['Search', Routes.Search],
-    ['Settings', Routes.SettingsDashboard],
+    ['Home', NewRoutes.Home],
+    ['Channels', NewRoutes.Channels],
+    ['Playlists', NewRoutes.Playlists],
+    ...(isAdmin ? [['Downloads', NewRoutes.Downloads]] : []),
+    ['Search', NewRoutes.Search],
+    ['Settings', NewRoutes.SettingsDashboard],
+    ['About', NewRoutes.About],
   ];
-  const navigation = (
-    <>
-      {links.map(([label, href]) => (
-        <Button key={label} variant={label === 'Home' ? 'secondary' : 'ghost'} size="sm" asChild>
-          <a href={href} aria-current={label === 'Home' ? 'page' : undefined}>
-            {label}
-          </a>
-        </Button>
-      ))}
-    </>
-  );
-  const logout = async () => {
+  const navigation = links.map(([label, href]) => (
+    <NavLink
+      key={href}
+      to={href}
+      end={href === NewRoutes.Home}
+      onClick={() => setMenuOpen(false)}
+      className={({ isActive }) =>
+        `inline-flex items-center rounded-md px-3 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring ${isActive ? 'bg-secondary text-secondary-foreground' : 'hover:bg-accent hover:text-accent-foreground'}`
+      }
+    >
+      {label}
+    </NavLink>
+  ));
+  async function logout() {
     setLoggingOut(true);
     setError('');
     try {
       const response = await logOut();
       if (response.status < 200 || response.status >= 300 || response.error)
-        throw new Error('Logout failed. Try again.');
-      window.location.assign('/login/?next=%2Fnew%2F');
+        throw new Error('Logout failed.');
+      window.location.assign(NewRoutes.Login);
     } catch {
       setError('Logout failed. Try again.');
       setLoggingOut(false);
     }
-  };
+  }
   return (
     <>
       <a className="sr-only focus:not-sr-only focus:block focus:p-2" href="#main">
@@ -117,14 +139,14 @@ function App() {
       </a>
       <header className="border-b">
         <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center gap-2 px-4 py-2">
-          <a href="/new/" className="mr-2 font-semibold tracking-tight">
+          <Link to={NewRoutes.Home} className="mr-2 font-semibold tracking-tight">
             TubeArchivist
-          </a>
-          <nav aria-label="Main" className="hidden items-center gap-1 lg:flex">
+          </Link>
+          <nav aria-label="Main" className="hidden items-center gap-1 xl:flex">
             {navigation}
           </nav>
-          <div className="lg:hidden">
-            <Sheet>
+          <div className="xl:hidden">
+            <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
               <SheetTrigger asChild>
                 <Button variant="outline" size="sm">
                   Menu
@@ -133,9 +155,7 @@ function App() {
               <SheetContent side="left">
                 <SheetHeader>
                   <SheetTitle>TubeArchivist</SheetTitle>
-                  <SheetDescription>
-                    Browse archive. Other pages open in Classic UI.
-                  </SheetDescription>
+                  <SheetDescription>Browse your archive.</SheetDescription>
                 </SheetHeader>
                 <nav aria-label="Mobile" className="flex flex-col items-stretch gap-1 p-4">
                   {navigation}
@@ -147,15 +167,22 @@ function App() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() =>
-                setTheme(theme === 'system' ? 'light' : theme === 'light' ? 'dark' : 'system')
-              }
+              onClick={() => {
+                const next = theme === 'system' ? 'light' : theme === 'light' ? 'dark' : 'system';
+                setTheme(next);
+                applyTheme(next);
+                try {
+                  localStorage.setItem('ta-new-theme', next);
+                } catch {
+                  /* Storage may be disabled. */
+                }
+              }}
               aria-label={`Theme: ${theme}. Switch to ${theme === 'system' ? 'light' : theme === 'light' ? 'dark' : 'system'}`}
             >
               {theme === 'system' ? 'System' : theme === 'dark' ? 'Dark' : 'Light'}
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <a href="/">Classic UI</a>
+              <a href={classicHref(location.pathname + location.search)}>Classic UI</a>
             </Button>
             <Button variant="ghost" size="sm" disabled={loggingOut} onClick={logout}>
               Logout
@@ -164,45 +191,101 @@ function App() {
         </div>
       </header>
       <main id="main" className="mx-auto max-w-screen-2xl space-y-4 p-4">
-        {error && (
-          <p role="alert" className="text-destructive">
-            {error}
-          </p>
-        )}
-        <Home />
-        <p className="border-t pt-4 text-xs text-muted-foreground">
-          Menu and Home preview. Playback and other pages open in Classic UI.
-        </p>
+        {error && <p role="alert">{error}</p>}
+        <Outlet />
       </main>
+      <footer className="mx-auto flex max-w-screen-2xl flex-wrap gap-3 border-t p-4 text-sm">
+        <span>TubeArchivist {auth?.version}</span>
+        {auth?.ta_update?.version && (
+          <a
+            className="underline"
+            href={`https://github.com/tubearchivist/tubearchivist/releases/tag/${encodeURIComponent(auth.ta_update.version)}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {auth.ta_update.version} available
+            {auth.ta_update.is_breaking ? ' — Breaking changes' : ''}
+          </a>
+        )}
+        <Link className="underline" to={NewRoutes.About}>
+          About
+        </Link>
+        <a
+          className="underline"
+          href="https://github.com/tubearchivist/tubearchivist"
+          target="_blank"
+          rel="noreferrer"
+        >
+          GitHub
+        </a>
+        <a
+          className="underline"
+          href="https://hub.docker.com/r/bbilly1/tubearchivist"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Docker Hub
+        </a>
+        <a
+          className="underline"
+          href="https://www.tubearchivist.com/discord"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Discord
+        </a>
+        <a
+          className="underline"
+          href="https://www.reddit.com/r/TubeArchivist/"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Reddit
+        </a>
+      </footer>
     </>
   );
 }
 
-function LoadError() {
-  return (
-    <main className="mx-auto max-w-xl space-y-4 p-6">
-      <h1 className="text-xl font-semibold">Unable to load TubeArchivist</h1>
-      <p role="alert">Session or account settings could not be loaded.</p>
-      <Button variant="outline" onClick={() => window.location.reload()}>
-        Retry
-      </Button>{' '}
-      <Button variant="outline" asChild>
-        <a href="/">Classic UI</a>
-      </Button>
-    </main>
-  );
-}
 const router = createBrowserRouter([
   {
-    path: '/new/',
-    loader: bootstrap,
-    element: <App />,
-    errorElement: <LoadError />,
+    element: <ThemeRoot />,
+    errorElement: <ErrorPage />,
     hydrateFallbackElement: (
       <p role="status" className="p-6">
         Loading TubeArchivist…
       </p>
     ),
+    children: [
+      { path: NewRoutes.Login, element: <Login /> },
+      {
+        path: '/new/',
+        loader: bootstrap,
+        element: <App />,
+        errorElement: <ErrorPage />,
+        children: [
+          { index: true, element: <Home /> },
+          { path: 'video/:videoId', element: <Video /> },
+          { path: 'channel', element: <Channels /> },
+          { path: 'channel/:channelId', element: <Channel /> },
+          { path: 'channel/:channelId/streams', element: <Channel /> },
+          { path: 'channel/:channelId/shorts', element: <Channel /> },
+          { path: 'channel/:channelId/playlist', element: <Channel /> },
+          { path: 'channel/:channelId/about', element: <Channel /> },
+          { path: 'playlist', element: <Playlists /> },
+          { path: 'playlist/:playlistId', element: <Playlist /> },
+          { path: 'search', element: <Search /> },
+          { path: 'downloads', element: <Download /> },
+          { path: 'settings', element: <SettingsDashboard /> },
+          { path: 'settings/user', element: <SettingsUser /> },
+          { path: 'settings/application', element: <SettingsApplication /> },
+          { path: 'settings/scheduling', element: <SettingsScheduling /> },
+          { path: 'settings/actions', element: <SettingsActions /> },
+          { path: 'about/', element: <About /> },
+          { path: '*', element: <NotFound /> },
+        ],
+      },
+    ],
   },
 ]);
 createRoot(document.getElementById('root')!).render(

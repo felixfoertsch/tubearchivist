@@ -21,14 +21,14 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.13'
+          python-version: "3.13"
           cache: pip
           cache-dependency-path: |
             requirements-dev.txt
             backend/requirements.txt
       - uses: actions/setup-node@v6
         with:
-          node-version: '24.21.0'
+          node-version: "24.21.0"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
@@ -40,10 +40,10 @@ jobs:
       - name: Validate source
         run: |
           node scripts/test-workflow.mjs
-          node --test frontend/tests/channel-rolling-window.mjs
           pre-commit run --all-files
           pytest backend
           npm run --prefix frontend build
+          node --test frontend/tests/*.mjs
           git diff --exit-code
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
