@@ -56,6 +56,11 @@ urlpatterns = [
         views_frontend.new_frontend_index,
         name="new-frontend",
     ),
+    path(
+        "new/<path:route>",
+        views_frontend.new_frontend_index,
+        name="new-frontend-route",
+    ),
     re_path(
         r"^(?!(?:api|admin|media|static|new)(?:/|$)).*$",
         views_frontend.frontend_index,
