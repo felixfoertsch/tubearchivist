@@ -86,7 +86,7 @@ class PublicationTests(unittest.TestCase):
     def test_workflow_gates_build_and_publication_independently(self):
         workflow = (Path(__file__).parents[2] / ".github/workflows/downstream.yml").read_text()
         self.assertEqual(workflow.count("id: publication"), 2)
-        self.assertEqual(workflow.count("FORCE: ${{ github.event_name == 'workflow_dispatch' }}"), 2)
+        self.assertEqual(workflow.count("FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.rebuild }}"), 2)
         for step in ("Build read-only candidate", "Record artifact provenance", "Verify artifact provenance and revision", "Publish verified image and source"):
             self.assertIn(f"- name: {step}\n        if: steps.publication.outputs.skip != 'true'", workflow)
 

@@ -6,6 +6,15 @@ on:
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:
+    inputs:
+      expected_control:
+        description: Exact control revision expected by refresh continuation
+        type: string
+        default: ''
+      rebuild:
+        description: Rebuild even when publication is complete
+        type: boolean
+        default: true
 
 concurrency:
   group: tubearchivist-downstream
@@ -15,8 +24,82 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  refresh-candidate:
     if: github.repository == 'felixfoertsch/tubearchivist' && github.ref == 'refs/heads/patch-queue'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.refresh.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reject stale continuation
+        env:
+          EXPECTED: ${{ inputs.expected_control }}
+        run: test -z "$EXPECTED" || test "$EXPECTED" = "$GITHUB_SHA"
+      - run: python3 -B -m unittest discover -s .automation/tests -v
+      - id: refresh
+        run: python3 .automation/refresh.py prepare "$RUNNER_TEMP/refresh"
+      - uses: actions/upload-artifact@v6
+        if: steps.refresh.outputs.changed == 'true'
+        with:
+          name: control-refresh
+          path: ${{ runner.temp }}/refresh/refresh.json
+          retention-days: 2
+
+  refresh-promote:
+    needs: refresh-candidate
+    if: needs.refresh-candidate.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: control-refresh
+          path: ${{ runner.temp }}/untrusted
+      - name: Independently reconstruct with trusted old control
+        run: |
+          python3 .automation/refresh.py prepare "$RUNNER_TEMP/refresh"
+          cmp "$RUNNER_TEMP/untrusted/refresh.json" "$RUNNER_TEMP/refresh/refresh.json"
+      - name: Create recoverable backup
+        run: python3 .automation/refresh.py backup "$RUNNER_TEMP/backup"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: control-backup-${{ github.sha }}
+          path: ${{ runner.temp }}/backup/
+          retention-days: 90
+      - uses: actions/download-artifact@v7
+        with:
+          name: control-backup-${{ github.sha }}
+          path: ${{ runner.temp }}/downloaded-backup
+      - name: Verify uploaded backup and atomically promote
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REBUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.rebuild }}
+        run: |
+          cmp "$RUNNER_TEMP/backup/control.sha256" "$RUNNER_TEMP/downloaded-backup/control.sha256"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          args=()
+          if [ "$REBUILD" = true ]; then args+=(--force); fi
+          python3 .automation/refresh.py promote "$RUNNER_TEMP/refresh" --downloaded "$RUNNER_TEMP/downloaded-backup" "${args[@]}"
+
+  build:
+    needs: refresh-candidate
+    if: needs.refresh-candidate.outputs.changed == 'false'
     strategy:
       fail-fast: false
       matrix:
@@ -53,7 +136,7 @@ jobs:
           SOURCE: ${{ steps.source.outputs.source_sha }}
           UPSTREAM: ${{ steps.source.outputs.upstream_sha }}
           QUEUE: ${{ github.sha }}
-          FORCE: ${{ github.event_name == 'workflow_dispatch' }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.rebuild }}
         run: |
           args=()
           if [ "$FORCE" = true ]; then args+=(--force); fi
@@ -172,7 +255,7 @@ jobs:
           SOURCE: ${{ steps.source.outputs.source_sha }}
           UPSTREAM: ${{ steps.source.outputs.upstream_sha }}
           QUEUE: ${{ github.sha }}
-          FORCE: ${{ github.event_name == 'workflow_dispatch' }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.rebuild }}
         run: |
           args=()
           if [ "$FORCE" = true ]; then args+=(--force); fi
