@@ -164,10 +164,7 @@ export default function Search() {
                 <Card key={subtitle.subtitle_fragment_id} className="gap-2 p-3">
                   <Link
                     className="font-semibold hover:underline"
-                    to={NewRoutes.VideoAtTimestamp(
-                      subtitle.youtube_id,
-                      subtitle.subtitle_start.split('.')[0],
-                    )}
+                    to={NewRoutes.VideoAtTimestamp(subtitle.youtube_id, subtitle.subtitle_start)}
                   >
                     {subtitle.title}
                   </Link>
@@ -186,7 +183,7 @@ export default function Search() {
                       setParams(previous => {
                         const next = new URLSearchParams(previous);
                         next.set('videoId', subtitle.youtube_id);
-                        next.set('t', subtitle.subtitle_start.split('.')[0]);
+                        next.set('t', subtitle.subtitle_start);
                         return next;
                       })
                     }

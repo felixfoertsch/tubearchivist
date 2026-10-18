@@ -544,8 +544,9 @@ function AdminSettings() {
                 </span>
                 <Button
                   variant="outline"
-                  disabled={!!pending}
+                  disabled={!!pending || snapshot.state !== 'SUCCESS'}
                   onClick={() =>
+                    snapshot.state === 'SUCCESS' &&
                     void mutate(
                       'restore snapshot',
                       () =>

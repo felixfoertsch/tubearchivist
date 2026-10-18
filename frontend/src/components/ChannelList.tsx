@@ -17,7 +17,8 @@ type ChannelListProps = {
 
 const ChannelList = ({ channelList, refreshChannelList }: ChannelListProps) => {
   const { userConfig } = useUserConfigStore();
-  const viewStyle = userConfig.view_style_channel;
+  const viewStyle =
+    userConfig.view_style_channel === 'table' ? 'list' : userConfig.view_style_channel;
 
   if (!channelList) {
     return <LoadingIndicator />;

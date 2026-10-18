@@ -11,7 +11,7 @@ import updateCustomPlaylist from '../../api/actions/updateCustomPlaylist';
 import humanFileSize from '../../functions/humanFileSize';
 import { FileSizeUnits } from '../../api/actions/updateUserConfig';
 import VideoCard from './VideoCard';
-import { collectionGrid } from './collectionLayout';
+import { Collection } from './Collection';
 import { togglePageSelection } from './BulkSelection';
 import { errorMessage, assertResponse } from '../videoMetadata';
 import { Button } from '../ui/button';
@@ -258,10 +258,7 @@ export function VideoCollection({
           </Table>
         </div>
       ) : (
-        <div
-          className={style === 'grid' ? collectionGrid : 'flex flex-col gap-3'}
-          style={{ ['--home-columns' as string]: Math.min(7, Math.max(3, userConfig.grid_items)) }}
-        >
+        <Collection grid={style === 'grid'}>
           {videos.map(video => (
             <VideoCard
               key={video.youtube_id}
@@ -273,7 +270,7 @@ export function VideoCollection({
               selection={checkbox(video)}
             />
           ))}
-        </div>
+        </Collection>
       )}
       {loading ? <p role="status">Loading videos…</p> : !videos.length && <p>No videos found.</p>}
     </div>

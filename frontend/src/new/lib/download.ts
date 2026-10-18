@@ -1,19 +1,19 @@
 export type DownloadRecord = {
-  auto_start: boolean;
+  auto_start?: boolean;
   channel_id: string;
   channel_indexed: boolean;
   channel_name: string;
   duration: string;
   message?: string;
   published: string | null;
-  status: string;
+  status?: 'pending' | 'ignore';
   timestamp: number | null;
   title: string;
   vid_thumb_url: string | null;
   vid_type: string;
   youtube_id: string;
-  _index: string;
-  _score: number;
+  _index?: string;
+  _score?: number;
 };
 export type DownloadResponseType = {
   data: DownloadRecord[];
@@ -55,7 +55,9 @@ export function assertDownloadResponse(response: {
         typeof record.title !== 'string' ||
         typeof record.channel_id !== 'string' ||
         typeof record.channel_name !== 'string' ||
-        (record.status !== 'pending' && record.status !== 'ignore') ||
+        (record.status !== undefined &&
+          record.status !== 'pending' &&
+          record.status !== 'ignore') ||
         typeof record.vid_type !== 'string' ||
         typeof record.duration !== 'string' ||
         (record.published !== null && typeof record.published !== 'string') ||
@@ -76,7 +78,7 @@ export function assertDownloadResponse(response: {
     !Number.isSafeInteger(page.current_page) ||
     (page.current_page as number) < 0 ||
     (page.last_page !== false &&
-      (!Number.isSafeInteger(page.last_page) || (page.last_page as number) < 1)) ||
+      (!Number.isSafeInteger(page.last_page) || (page.last_page as number) < 0)) ||
     !Number.isSafeInteger(page.page_size) ||
     (page.page_size as number) <= 0 ||
     !Number.isSafeInteger(page.page_from) ||
@@ -110,6 +112,7 @@ export function assertTaskNotifications(
         typeof task.api_stop !== 'boolean' ||
         (task.level !== 'info' && task.level !== 'error') ||
         (task.command !== undefined &&
+          task.command !== null &&
           typeof task.command !== 'boolean' &&
           task.command !== 'STOP' &&
           task.command !== 'KILL')
