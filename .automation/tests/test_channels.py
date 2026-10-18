@@ -22,9 +22,9 @@ class ChannelTests(unittest.TestCase):
 
     def test_workflow_guards_both_promotions(self):
         workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/downstream.yml").read_text()
-        self.assertIn('refs/heads/main:$EXPECTED_MAIN', workflow)
+        self.assertIn('--expected-main "$EXPECTED_MAIN"', workflow)
         self.assertGreaterEqual(workflow.count('git rev-parse FETCH_HEAD^{commit}'), 2)
-        self.assertIn('refs/tags/$IDENTITY:', workflow)
+        self.assertIn('.automation/source_refs.py', workflow)
         self.assertIn('if [ "$CHANNEL" = nightly ]; then', workflow)
         self.assertEqual(workflow.count('persist-credentials: false'), 4)
         self.assertEqual(workflow.count('ref: ${{ github.sha }}'), 4)
@@ -32,7 +32,8 @@ class ChannelTests(unittest.TestCase):
         self.assertIn('outputs: type=oci,dest=', workflow)
         self.assertNotIn('persist-credentials: true', workflow)
         self.assertIn('Independently reconstruct expected source', workflow)
-        self.assertIn('--preserve-digests', workflow)
+        self.assertIn('.automation/image_identity.py', workflow)
+        self.assertIn('--preserve-digests', (Path(__file__).resolve().parents[1] / 'image_identity.py').read_text())
         self.assertIn('actions/download-artifact@v7', workflow)
         build = workflow.split('  build:', 1)[1].split('  publish:', 1)[0]
         self.assertNotIn('contents: write', build)

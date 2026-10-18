@@ -299,22 +299,24 @@ jobs:
           git fetch --no-tags https://github.com/tubearchivist/tubearchivist.git "$REF"
           test "$(git rev-parse FETCH_HEAD^{commit})" = "$UPSTREAM"
           test "$(gh api repos/tubearchivist/tubearchivist/releases/latest --jq .tag_name)" = "$TAG"
-          test -z "$(git ls-remote origin "refs/tags/$IDENTITY")"
+          existing=$(git ls-remote origin "refs/tags/$IDENTITY" | cut -f1)
+          test -z "$existing" || test "$existing" = "$SOURCE"
           printf '%s' "$GH_TOKEN" | skopeo login --username '${{ github.actor }}' --password-stdin ghcr.io
-          skopeo copy --all --preserve-digests "oci-archive:$RUNNER_TEMP/candidate/candidate.tar" "docker://$IMAGE:$IDENTITY"
-          digest=$(skopeo inspect --raw "docker://$IMAGE:$IDENTITY" | sha256sum | cut -d' ' -f1)
-          test "$digest" = "$(skopeo inspect --raw "oci-archive:$RUNNER_TEMP/candidate/candidate.tar" | sha256sum | cut -d' ' -f1)"
+          digest=$(python3 .automation/image_identity.py "oci-archive:$RUNNER_TEMP/candidate/candidate.tar" "docker://$IMAGE:$IDENTITY")
           test "$(git ls-remote origin refs/heads/patch-queue | cut -f1)" = "$QUEUE"
           git fetch --no-tags https://github.com/tubearchivist/tubearchivist.git "$REF"
           test "$(git rev-parse FETCH_HEAD^{commit})" = "$UPSTREAM"
           test "$(gh api repos/tubearchivist/tubearchivist/releases/latest --jq .tag_name)" = "$TAG"
           git -C "$RUNNER_TEMP/source" remote set-url origin 'https://github.com/${{ github.repository }}.git'
-          git -C "$RUNNER_TEMP/source" -c tag.gpgSign=false tag "$IDENTITY" "$SOURCE"
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           echo "::add-mask::$auth"
-          git -C "$RUNNER_TEMP/source" -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push --force-with-lease="refs/tags/$IDENTITY:" origin "refs/tags/$IDENTITY:refs/tags/$IDENTITY"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          source_args=()
+          if [ "$CHANNEL" = nightly ]; then source_args+=(--expected-main "$EXPECTED_MAIN"); fi
+          python3 .automation/source_refs.py "$RUNNER_TEMP/source" "$SOURCE" "$IDENTITY" "${source_args[@]}"
           if [ "$CHANNEL" = nightly ]; then
-            git -C "$RUNNER_TEMP/source" -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push --force-with-lease="refs/heads/main:$EXPECTED_MAIN" origin "$SOURCE:refs/heads/main"
             tags="nightly edge develop"
           else
             tags="latest stable"
