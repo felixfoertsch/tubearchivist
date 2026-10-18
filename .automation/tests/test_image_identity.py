@@ -41,10 +41,21 @@ class ImageIdentityTests(unittest.TestCase):
                             image.publish("oci-archive:candidate", "docker://image:identity")
                 self.assertEqual(len(writes), 1 if state == "absent" else 0)
 
+    def test_explicit_absence_accepts_ghcr_without_colon(self):
+        for message in (b'manifest unknown: missing', b'reading manifest v0.5.12 in ghcr.io/felixfoertsch/tubearchivist: manifest unknown', b'name unknown', b'MANIFEST UNKNOWN'):
+            with self.subTest(message=message), patch.object(image, "run", return_value=subprocess.CompletedProcess([], 1, b"", message)):
+                self.assertIsNone(image.manifest("docker://image:identity", missing_ok=True))
+                with self.assertRaises(RuntimeError):
+                    image.manifest("docker://image:identity")
+        for message in (b'manifest unknownish', b'notmanifest unknown', b'unauthorized: denied', b'timeout', b'blob unknown: missing'):
+            with self.subTest(message=message), patch.object(image, "run", return_value=subprocess.CompletedProcess([], 1, b"", message)):
+                with self.assertRaises(RuntimeError):
+                    image.manifest("docker://image:identity", missing_ok=True)
+
     def test_manifest_failure_projects_only_fixed_markers(self):
-        result = subprocess.CompletedProcess([], 1, b"", b'manifest unknown; synthetic-secret-token')
+        result = subprocess.CompletedProcess([], 1, b"", b'unauthorized; synthetic-secret-token')
         with patch.object(image, "run", return_value=result):
-            with self.assertRaisesRegex(RuntimeError, r'markers=\["manifest unknown"\]') as error:
+            with self.assertRaisesRegex(RuntimeError, r'markers=\["unauthorized"\]') as error:
                 image.manifest("docker://image:identity", missing_ok=True)
         self.assertNotIn("synthetic-secret-token", str(error.exception))
 

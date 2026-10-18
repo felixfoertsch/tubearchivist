@@ -17,7 +17,7 @@ def manifest(location, missing_ok=False):
     if result.returncode:
         # Only explicit registry manifest/name absence permits creation.
         error = result.stderr.decode(errors="replace")
-        if missing_ok and re.search(r"(?:manifest unknown|name unknown):", error, re.IGNORECASE):
+        if missing_ok and re.search(r"\b(?:manifest unknown|name unknown)\b(?=[:\s\"']|$)", error, re.IGNORECASE):
             return None
         # Project fixed markers only; registry stderr can contain credentials.
         markers = [name for name in ("manifest unknown", "name unknown", "unauthorized", "denied", "timeout", "connection refused", "404", "403", "401") if name in error.lower()]
