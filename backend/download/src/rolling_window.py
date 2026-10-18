@@ -71,7 +71,7 @@ class RollingWindow:
         return depth != 0
 
     def reconcile(self):
-        """Prune only after a successful bounded fetch and finished downloads."""
+        """Require bounded fetch success and finished downloads to prune."""
         settings = self.settings()
         if not self.enabled(settings) or (
             self.task and self.task.is_stopped()

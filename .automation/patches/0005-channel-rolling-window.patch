@@ -94,14 +94,10 @@ index a546f75b..54111901 100644
 +                raise ValueError("Incomplete index search")
              all_hits = response["hits"]["hits"]
 diff --git a/backend/download/src/queue.py b/backend/download/src/queue.py
-index 81ada735..38deea94 100644
+index 81ada735..51738f21 100644
 --- a/backend/download/src/queue.py
 +++ b/backend/download/src/queue.py
-@@ -7,2 +7,3 @@ Functionality:
- import json
-+import os
- from datetime import datetime
-@@ -30,2 +31,18 @@ from video.src.index import YoutubeVideo
+@@ -30,2 +30,18 @@ from video.src.index import YoutubeVideo
  
 +def delete_and_ignore(videos):
 +    """Share watched-age deletion and its normal ignore-queue path."""
@@ -122,7 +118,7 @@ index 81ada735..38deea94 100644
  class PendingIndex:
 diff --git a/backend/download/src/rolling_window.py b/backend/download/src/rolling_window.py
 new file mode 100644
-index 00000000..b09bc825
+index 00000000..020a2828
 --- /dev/null
 +++ b/backend/download/src/rolling_window.py
 @@ -0,0 +1,133 @@
@@ -199,7 +195,7 @@ index 00000000..b09bc825
 +        return depth != 0
 +
 +    def reconcile(self):
-+        """Prune only after a successful bounded fetch and finished downloads."""
++        """Require bounded fetch success and finished downloads to prune."""
 +        settings = self.settings()
 +        if not self.enabled(settings) or (
 +            self.task and self.task.is_stopped()
