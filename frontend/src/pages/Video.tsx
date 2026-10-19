@@ -346,8 +346,13 @@ const Video = () => {
             </div>
 
             <div className="button-box">
-              <a download="" href={`${getApiUrl()}${video.media_url}`}>
-                <Button label="Download File" id="download-item" />
+              <a
+                className="classic-button-link"
+                id="download-item"
+                download=""
+                href={`${getApiUrl()}${video.media_url}`}
+              >
+                Download File
               </a>
             </div>
 

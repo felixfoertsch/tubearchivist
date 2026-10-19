@@ -122,7 +122,7 @@ export default function Channels() {
                 onChange={e => setInput(e.target.value)}
                 placeholder="Channel IDs, URLs, or video URLs"
               />
-              <Button variant="outline" disabled={pending || !input.trim()}>
+              <Button variant="default" disabled={pending || !input.trim()}>
                 {pending ? 'Working…' : 'Subscribe'}
               </Button>
             </form>

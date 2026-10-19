@@ -108,7 +108,7 @@ function ChannelCard({
     <div className="shrink-0">
       <Button
         className="min-h-10"
-        variant={channel.channel_subscribed ? 'outline' : 'secondary'}
+        variant={channel.channel_subscribed ? 'secondary' : 'default'}
         size="sm"
         disabled={pending}
         onClick={() => void toggle()}

@@ -92,7 +92,7 @@ export default function VideoCard({
       actions={
         <fieldset disabled={pending} className="flex flex-wrap gap-1">
           <Button
-            variant="outline"
+            variant={video.player.watched ? 'secondary' : 'default'}
             size="sm"
             onClick={() =>
               void run(() =>
@@ -104,7 +104,7 @@ export default function VideoCard({
           </Button>
           {video.player.position > 0 && (
             <Button
-              variant="ghost"
+              variant="destructive"
               size="sm"
               onClick={() => void run(() => deleteVideoProgressById(video.youtube_id))}
             >
@@ -117,7 +117,7 @@ export default function VideoCard({
             (['top', 'up', 'down', 'bottom', 'remove'] as const).map(action => (
               <Button
                 key={action}
-                variant="outline"
+                variant={action === 'remove' ? 'destructive' : 'outline'}
                 size="sm"
                 onClick={() => {
                   const targetPlaylist = playlistId;

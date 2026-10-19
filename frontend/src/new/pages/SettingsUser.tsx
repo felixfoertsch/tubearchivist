@@ -107,7 +107,7 @@ export default function SettingsUser() {
         )}
         <div className="flex flex-wrap items-center gap-2">
           <Button
-            variant="secondary"
+            variant="default"
             disabled={!dirty || pending || !validPageSize}
             onClick={() => {
               try {

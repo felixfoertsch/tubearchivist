@@ -176,7 +176,7 @@ export function Home() {
           {continueError ? (
             <p role="alert">
               {continueError}{' '}
-              <Button variant="outline" size="sm" onClick={refresh}>
+              <Button variant="default" size="sm" onClick={refresh}>
                 Retry
               </Button>
             </p>
@@ -319,7 +319,7 @@ export function Home() {
         {recentError && (
           <p role="alert">
             {recentError}{' '}
-            <Button variant="outline" size="sm" onClick={refresh}>
+            <Button variant="default" size="sm" onClick={refresh}>
               Retry
             </Button>{' '}
             <Button

@@ -19,7 +19,7 @@ export default function ErrorPage() {
           : 'Session, account settings or page data could not be loaded. Check your connection and retry.'}
       </p>
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" onClick={() => window.location.reload()}>
+        <Button variant="default" onClick={() => window.location.reload()}>
           Retry
         </Button>
         <Button variant="outline" asChild>

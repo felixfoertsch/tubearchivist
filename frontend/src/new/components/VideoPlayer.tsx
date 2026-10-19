@@ -446,8 +446,7 @@ function Player({
           </label>
           {!embed && (
             <Button
-              variant="outline"
-              aria-pressed={theater}
+              variant={theater ? 'secondary' : 'outline'}
               onClick={() => setTheater(value => !value)}
             >
               {theater ? 'Exit theater' : 'Theater'}
@@ -493,7 +492,7 @@ function Player({
         <div role="alert" className="rounded-lg border border-destructive p-3">
           <p>{error}</p>
           <Button
-            variant="outline"
+            variant="default"
             onClick={() => {
               if (media.current?.error) media.current.load();
               void play();
@@ -507,7 +506,7 @@ function Player({
         <div role="alert" className="rounded-lg border border-destructive p-3">
           <p>{progressError}</p>
           <Button
-            variant="outline"
+            variant="default"
             onClick={async () => {
               await save(media.current?.currentTime ?? 0);
             }}

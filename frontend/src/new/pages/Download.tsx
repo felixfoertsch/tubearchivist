@@ -246,7 +246,7 @@ export function Download() {
       {queueError && (
         <p role="alert" className="text-sm text-foreground">
           {queueError}{' '}
-          <Button variant="outline" onClick={refreshList}>
+          <Button variant="default" onClick={refreshList}>
             Retry loading queue
           </Button>
         </p>
@@ -311,7 +311,7 @@ export function Download() {
           </NativeSelect>
         )}
         <Button
-          variant="secondary"
+          variant="default"
           disabled={pending}
           onClick={() =>
             void action(() => updateTaskByName('update_subscribed'), 'Subscription rescan started')
@@ -320,7 +320,7 @@ export function Download() {
           Rescan subscriptions
         </Button>
         <Button
-          variant="secondary"
+          variant="default"
           disabled={pending}
           onClick={() =>
             void action(() => updateTaskByName('download_pending'), 'Download started')
@@ -328,7 +328,11 @@ export function Download() {
         >
           Start download
         </Button>
-        <Button variant="outline" onClick={() => setAdvanced(value => !value)}>
+        <Button
+          variant="outline"
+          aria-expanded={advanced}
+          onClick={() => setAdvanced(value => !value)}
+        >
           {advanced ? 'Hide advanced' : 'Show advanced'}
         </Button>
         <Button variant="outline" onClick={refreshList}>
@@ -360,7 +364,7 @@ export function Download() {
           ))}
         </div>
         <Button
-          variant="secondary"
+          variant="default"
           disabled={pending || !queueText.trim()}
           onClick={() =>
             void action(
@@ -469,7 +473,7 @@ export function Download() {
                   }}
                 />
                 <Button
-                  variant="outline"
+                  variant="default"
                   disabled={pending || !regexReady}
                   onClick={() => {
                     if (!regexReady) return;
@@ -499,7 +503,7 @@ export function Download() {
                     <p role="alert">
                       {regexLoad.error}{' '}
                       <Button
-                        variant="outline"
+                        variant="default"
                         onClick={() => {
                           setRegexLoad(undefined);
                           setRegexRetry(value => value + 1);
@@ -539,7 +543,7 @@ export function Download() {
               ).map(([status, label]) => (
                 <Button
                   key={status}
-                  variant="outline"
+                  variant={status === 'ignore' ? 'destructive' : 'default'}
                   disabled={pending || !queueReady}
                   onClick={() =>
                     void action(
@@ -566,7 +570,7 @@ export function Download() {
             {confirmForget ? (
               <>
                 <Button
-                  variant="outline"
+                  variant="destructive"
                   disabled={pending || !queueReady || !!search || !!errorFilter}
                   onClick={() => {
                     const status = ignored ? 'ignore' : 'pending';
@@ -594,7 +598,7 @@ export function Download() {
               </>
             ) : (
               <Button
-                variant="outline"
+                variant="destructive"
                 disabled={pending || !queueReady || !!search || !!errorFilter}
                 onClick={() => setConfirmForget(true)}
               >

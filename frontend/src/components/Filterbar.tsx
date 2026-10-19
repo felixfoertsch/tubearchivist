@@ -126,12 +126,19 @@ const Filterbar = ({
     <>
       <div className="view-controls">
         <div className="view-icons">
-          <img
-            alt="icon multi select"
-            src={iconMultiSelect}
+          <button
+            type="button"
+            className="classic-icon-button"
+            aria-label="Select videos"
+            aria-pressed={showSelection}
             onClick={() => setShowSelection(!showSelection)}
-            title={showSelection ? 'Hide multi select boxes' : 'Show multi select boxes'}
-          />
+          >
+            <img
+              alt=""
+              src={iconMultiSelect}
+              title={showSelection ? 'Hide multi select boxes' : 'Show multi select boxes'}
+            />
+          </button>
           {showFilterItems && (
             <div>
               <span>Filter:</span>
@@ -170,11 +177,15 @@ const Filterbar = ({
               />
             </div>
           )}
-          <img
-            src={iconFilter}
-            alt="icon filter"
+          <button
+            type="button"
+            className="classic-icon-button"
+            aria-label="Filters"
+            aria-expanded={showFilterItems}
             onClick={() => setShowFilterItems(!showFilterItems)}
-          />
+          >
+            <img src={iconFilter} alt="" />
+          </button>
           {showHidden && (
             <div className="sort">
               <span>Sort:</span>
@@ -213,58 +224,79 @@ const Filterbar = ({
             </div>
           )}
           {showSort && (
-            <img
-              src={iconSort}
-              alt="sort-icon"
+            <button
+              type="button"
+              className="classic-icon-button"
+              aria-label="Sort options"
+              aria-expanded={showHidden}
               onClick={() => {
                 setShowHidden(!showHidden);
               }}
-              id="animate-icon"
-            />
+            >
+              <img src={iconSort} alt="" id="animate-icon" />
+            </button>
           )}
           {userConfig.grid_items !== undefined && isGridView && (
             <div className="grid-count">
               {userConfig.grid_items < 7 && (
-                <img
-                  src={iconAdd}
+                <button
+                  type="button"
+                  className="classic-icon-button"
+                  aria-label="Increase grid columns"
                   onClick={() => {
                     handleUserConfigUpdate({ grid_items: userConfig.grid_items + 1 });
                   }}
-                  alt="grid plus row"
-                />
+                >
+                  <img src={iconAdd} alt="" />
+                </button>
               )}
               {userConfig.grid_items > 3 && (
-                <img
-                  src={iconSubstract}
+                <button
+                  type="button"
+                  className="classic-icon-button"
+                  aria-label="Decrease grid columns"
                   onClick={() => {
                     handleUserConfigUpdate({ grid_items: userConfig.grid_items - 1 });
                   }}
-                  alt="grid minus row"
-                />
+                >
+                  <img src={iconSubstract} alt="" />
+                </button>
               )}
             </div>
           )}
-          <img
-            src={iconGridView}
+          <button
+            type="button"
+            className="classic-icon-button"
+            aria-label="Grid view"
+            aria-pressed={isGridView}
             onClick={() => {
               handleUserConfigUpdate({ [viewStyle]: ViewStylesEnum.Grid });
             }}
-            alt="grid view"
-          />
-          <img
-            src={iconListView}
+          >
+            <img src={iconGridView} alt="" />
+          </button>
+          <button
+            type="button"
+            className="classic-icon-button"
+            aria-label="List view"
+            aria-pressed={currentViewStyle === ViewStylesEnum.List}
             onClick={() => {
               handleUserConfigUpdate({ [viewStyle]: ViewStylesEnum.List });
             }}
-            alt="list view"
-          />
-          <img
-            src={iconTableView}
+          >
+            <img src={iconListView} alt="" />
+          </button>
+          <button
+            type="button"
+            className="classic-icon-button"
+            aria-label="Table view"
+            aria-pressed={currentViewStyle === ViewStylesEnum.Table}
             onClick={() => {
               handleUserConfigUpdate({ [viewStyle]: ViewStylesEnum.Table });
             }}
-            alt="table view"
-          />
+          >
+            <img src={iconTableView} alt="" />
+          </button>
         </div>
       </div>
       {showSelection && (

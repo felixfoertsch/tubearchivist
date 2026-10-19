@@ -237,7 +237,7 @@ export default function GoogleCast({ video, setRefresh, onWatchStateChanged }: P
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-3">
-        <Button variant="outline" disabled={!ready || pending} onClick={() => void start()}>
+        <Button variant="default" disabled={!ready || pending} onClick={() => void start()}>
           {pending ? 'Connecting…' : 'Cast video'}
         </Button>
         {createElement('google-cast-launcher', {

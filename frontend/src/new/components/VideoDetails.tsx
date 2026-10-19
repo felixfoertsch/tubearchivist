@@ -80,7 +80,7 @@ export default function VideoDetails({
             </span>
             {isAdmin && (
               <Button
-                variant="outline"
+                variant={channel.channel_subscribed ? 'secondary' : 'default'}
                 size="sm"
                 disabled={busy}
                 onClick={() =>
@@ -157,6 +157,7 @@ export default function VideoDetails({
               </p>
               <Button
                 variant="link"
+                aria-expanded={expanded}
                 className="px-0 text-foreground"
                 onClick={() => setExpanded(!expanded)}
               >
@@ -168,8 +169,7 @@ export default function VideoDetails({
             <p role="alert" className="text-sm text-foreground">
               {error}{' '}
               <Button
-                variant="link"
-                className="text-foreground"
+                variant="default"
                 onClick={() =>
                   run(() =>
                     updateChannelSubscription(channel.channel_id, !channel.channel_subscribed),

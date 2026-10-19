@@ -140,7 +140,7 @@ export default function Playlists() {
               onChange={e => setIds(e.target.value)}
             />
             <Button
-              variant="outline"
+              variant="default"
               disabled={pending || !ids.trim()}
               onClick={() =>
                 void mutate(async () => {
@@ -160,7 +160,7 @@ export default function Playlists() {
               onChange={e => setName(e.target.value)}
             />
             <Button
-              variant="outline"
+              variant="default"
               disabled={pending || !name.trim()}
               onClick={() =>
                 void mutate(async () => {

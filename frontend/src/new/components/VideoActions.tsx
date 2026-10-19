@@ -115,7 +115,7 @@ export default function VideoActions({
     <Card className="py-4">
       <CardContent className="flex flex-wrap items-center gap-2">
         <Button
-          variant="outline"
+          variant={video.player.watched ? 'secondary' : 'default'}
           disabled={pending}
           onClick={() =>
             run(async () =>
@@ -130,19 +130,24 @@ export default function VideoActions({
         >
           {video.player.watched ? 'Mark unwatched' : 'Mark watched'}
         </Button>
-        <Button variant="outline" asChild>
+        <Button variant="default" asChild>
           <a download href={playerMediaUrl(video.media_url, getApiUrl())}>
             Download file
           </a>
         </Button>
         {isAdmin && (
-          <Button variant="outline" disabled={pending} onClick={loadPlaylists}>
+          <Button
+            variant="outline"
+            aria-expanded={showPlaylists}
+            disabled={pending}
+            onClick={loadPlaylists}
+          >
             Playlists
           </Button>
         )}
         {isAdmin && (
           <Button
-            variant="outline"
+            variant="default"
             disabled={pending || reindexed}
             onClick={() =>
               run(async () => {
@@ -162,7 +167,7 @@ export default function VideoActions({
             }}
           >
             <AlertDialogTrigger asChild>
-              <Button variant="outline" disabled={pending}>
+              <Button variant="destructive" disabled={pending}>
                 Delete video
               </Button>
             </AlertDialogTrigger>
@@ -191,7 +196,7 @@ export default function VideoActions({
               <AlertDialogFooter>
                 <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
                 <AlertDialogAction
-                  variant="outline"
+                  variant="destructive"
                   disabled={pending}
                   onClick={event => {
                     event.preventDefault();
@@ -201,7 +206,7 @@ export default function VideoActions({
                   Delete
                 </AlertDialogAction>
                 <AlertDialogAction
-                  variant="outline"
+                  variant="destructive"
                   disabled={pending}
                   onClick={event => {
                     event.preventDefault();
@@ -225,7 +230,7 @@ export default function VideoActions({
             {playlistError ? (
               <p role="alert">
                 {playlistError}{' '}
-                <Button variant="link" className="text-foreground" onClick={loadPlaylists}>
+                <Button variant="default" onClick={loadPlaylists}>
                   Retry
                 </Button>
               </p>
@@ -233,7 +238,11 @@ export default function VideoActions({
               playlists.map(playlist => (
                 <Button
                   key={playlist.playlist_id}
-                  variant="outline"
+                  variant={
+                    playlist.playlist_entries.some(entry => entry.youtube_id === video.youtube_id)
+                      ? 'destructive'
+                      : 'default'
+                  }
                   disabled={pending}
                   onClick={() => togglePlaylist(playlist)}
                 >
