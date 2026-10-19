@@ -11,6 +11,7 @@ type NotificationType = {
   command?: boolean | string | null;
   messages: string[];
   progress: number;
+  youtube_id?: string;
 };
 
 export type NotificationResponseType = NotificationType[];

@@ -905,6 +905,7 @@ export function createPreviewServer({ dist = defaultDist, fixtureMedia } = {}) {
                       id: 'local-task',
                       title: 'Local fixture task',
                       group: 'download',
+                      youtube_id: 'local-pending',
                       progress: 0.5,
                       messages: [
                         state.taskMode === 'error'

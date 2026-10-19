@@ -140,7 +140,9 @@ class VideoDownloader(DownloaderBase):
         typ = VideoTypeEnum(video_data["vid_type"]).value.rstrip("s").title()
         title = video_data.get("title")
         self.task.send_progress(
-            [f"Processing {typ}: {title}", message], progress=progress
+            [f"Processing {typ}: {title}", message],
+            progress=progress,
+            youtube_id=video_data.get("youtube_id"),
         )
 
     def _get_next(self, auto_only):
@@ -182,8 +184,12 @@ class VideoDownloader(DownloaderBase):
             message = "processing"
 
         if self.task:
-            title = response["info_dict"]["title"]
-            self.task.send_progress([title, message], progress=progress)
+            info = response["info_dict"]
+            self.task.send_progress(
+                [info["title"], message],
+                progress=progress,
+                youtube_id=info.get("id"),
+            )
 
     def _build_obs(self):
         """collection to build all obs passed to yt-dlp"""

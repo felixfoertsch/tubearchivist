@@ -39,3 +39,18 @@ def test_notification_serializes_no_command_as_null():
     ).data
     assert response["command"] is None
     assert response["progress"] == 0
+
+
+def test_notification_exposes_active_download_video():
+    base = {
+        "id": "test",
+        "title": "Downloading",
+        "group": "download:run",
+        "api_start": True,
+        "api_stop": True,
+        "level": "info",
+        "messages": [],
+    }
+    assert "youtube_id" not in NotificationSerializer(base).data
+    data = NotificationSerializer({**base, "youtube_id": "abc"}).data
+    assert data["youtube_id"] == "abc"

@@ -24,6 +24,8 @@ import type { AuthenticationType } from '../pages/Base';
 import NewRoutes from './routes';
 import { classicHref, loginHref } from './lib/navigation';
 import { applyTheme, readTheme } from './lib/theme';
+import { startTaskPolling } from './lib/tasks';
+import { TaskIndicator } from './components/TaskNotifications';
 import { Button } from './ui/button';
 import {
   Sheet,
@@ -93,6 +95,7 @@ function App() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [theme, setTheme] = useState(readTheme);
+  useEffect(() => (isAdmin ? startTaskPolling() : undefined), [isAdmin]);
   const links = [
     ['Home', NewRoutes.Home],
     ['Channels', NewRoutes.Channels],
@@ -160,6 +163,7 @@ function App() {
             </Sheet>
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-1">
+            {isAdmin && <TaskIndicator />}
             <Button
               variant="ghost"
               size="sm"

@@ -5,6 +5,8 @@ import {
   assertDownloadResponse,
   assertTaskNotifications,
   pollWhileActive,
+  taskPercent,
+  taskTransition,
   downloadPreviousPage,
   downloadQueryKey,
   downloadBulkScope,
@@ -178,4 +180,29 @@ test('polling continues while active and does not consume or reschedule after cl
   assert.equal(scheduled, undefined);
   assert.equal(cancelled, true);
   assert.equal(errors, 0);
+});
+
+test('task transitions report finished runs and advancing downloads; percent is clamped', () => {
+  const a = { youtube_id: 'a' };
+  const plain = {};
+  assert.deepEqual(taskTransition([], []), { finished: false, advanced: false });
+  assert.deepEqual(taskTransition([a], [a]), { finished: false, advanced: false });
+  assert.deepEqual(taskTransition([a], [{ youtube_id: 'b' }]), { finished: false, advanced: true });
+  assert.deepEqual(taskTransition([a], [plain]), { finished: false, advanced: true });
+  assert.deepEqual(taskTransition([plain], []), { finished: true, advanced: true });
+  assert.deepEqual(taskTransition([plain], [a]), { finished: false, advanced: false });
+  assert.deepEqual(
+    [taskPercent(undefined), taskPercent(-1), taskPercent(0.456), taskPercent(2)],
+    [0, 0, 46, 100],
+  );
+  const task = {
+    id: 't',
+    title: 'Downloading',
+    api_stop: true,
+    level: 'info',
+    messages: [],
+    youtube_id: 'a',
+  };
+  assert.deepEqual(assertTaskNotifications([task]), [task]);
+  assert.throws(() => assertTaskNotifications([{ ...task, youtube_id: 1 }]), /Invalid task/);
 });
