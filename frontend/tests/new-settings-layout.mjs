@@ -114,7 +114,7 @@ test('actual router redirects legacy sections, removes product About, keeps chan
           createBrowserRouter: value => {
             router = value;
           },
-          useLocation: () => ({ pathname: '/new/settings/', search: '', hash: '#application' }),
+          useLocation: () => ({ pathname: '/settings/', search: '', hash: '#application' }),
           redirect: value => value,
         };
       if (path === 'react') return { useState: initial => [initial, () => {}], useEffect() {} };
@@ -131,7 +131,7 @@ test('actual router redirects legacy sections, removes product About, keeps chan
       return new Proxy({}, { get: () => () => null });
     },
   });
-  const app = router[0].children.find(route => route.path === '/new/');
+  const app = router[0].children.find(route => route.path === '/');
   const shell = app.element.type();
   const nodes = [];
   const walk = node => {
@@ -142,12 +142,12 @@ test('actual router redirects legacy sections, removes product About, keeps chan
   };
   walk(shell);
   assert.ok(
-    nodes.some(node => node.props?.to === '/new/dashboard/' && node.props.children === 'Dashboard'),
+    nodes.some(node => node.props?.to === '/dashboard/' && node.props.children === 'Dashboard'),
   );
   assert.ok(
-    nodes.some(node => node.props?.to === '/new/settings/' && node.props.children === 'Settings'),
+    nodes.some(node => node.props?.to === '/settings/' && node.props.children === 'Settings'),
   );
-  assert.ok(!nodes.some(node => node.props?.to === '/new/about/'));
+  assert.ok(!nodes.some(node => node.props?.to === '/about/'));
   const footer = nodes.find(node => node.type === 'footer');
   const footerNodes = [];
   const oldLength = nodes.length;
@@ -166,7 +166,7 @@ test('actual router redirects legacy sections, removes product About, keeps chan
   for (const section of ['user', 'application', 'scheduling', 'actions']) {
     assert.equal(
       await app.children.find(route => route.path === `settings/${section}`).loader(),
-      `/new/settings/#${section}`,
+      `/settings/#${section}`,
     );
   }
 });

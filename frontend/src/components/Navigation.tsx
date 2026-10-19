@@ -33,7 +33,7 @@ const Navigation = () => {
           </div>
         </div>
         <div className="nav-icons">
-          <a href="/new/">Try new UI</a>
+          <a href="/">New UI</a>
           <Link to={Routes.Search}>
             <img src={iconSearch} alt="search-icon" title="Search" />
           </Link>

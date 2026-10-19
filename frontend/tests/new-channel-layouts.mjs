@@ -102,7 +102,7 @@ test('channel directory renders distinct compact saved views', async t => {
       assert.match(html, /src="\/avatar-0.jpg"/);
       assert.doesNotMatch(html, /banner-\d/);
       assert.match(html, /aspect-video w-full object-cover/);
-      assert.match(html, /href="\/new\/channel\/channel-0"/);
+      assert.match(html, /href="\/channel\/channel-0"/);
       assert.match(html, /2026-10-18/);
       assert.match(html, /1,234/);
     });

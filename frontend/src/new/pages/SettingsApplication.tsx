@@ -19,7 +19,7 @@ import { Checkbox } from '../ui/checkbox';
 
 type State = {
   settings: AppSettingsConfigType;
-  snapshots: SnapshotListType;
+  snapshots: SnapshotListType | null;
   token: string;
   cookie: CookieStateType;
 };
@@ -519,8 +519,9 @@ function AdminSettings() {
               Enable index snapshots
             </label>
             <p className="text-sm">
-              Next snapshot: {isoDateTime(data.snapshots.next_exec)}; expires after{' '}
-              {data.snapshots.expire_after}.
+              {data.snapshots
+                ? `Next snapshot: ${isoDateTime(data.snapshots.next_exec)}; expires after ${data.snapshots.expire_after}.`
+                : 'No snapshot policy available.'}
             </p>
             <Button
               variant="secondary"
@@ -535,7 +536,7 @@ function AdminSettings() {
             >
               Create snapshot now
             </Button>
-            {(data.snapshots.snapshots || []).slice(0, visibleSnapshots).map(snapshot => (
+            {(data.snapshots?.snapshots || []).slice(0, visibleSnapshots).map(snapshot => (
               <div key={snapshot.id} className="flex flex-wrap items-center gap-2 text-sm">
                 <span>
                   {isoDateTime(snapshot.end_stamp - snapshot.duration_s)}, {snapshot.duration_s}s,{' '}
@@ -561,7 +562,7 @@ function AdminSettings() {
                 </Button>
               </div>
             ))}
-            {(data.snapshots.snapshots?.length || 0) > visibleSnapshots && (
+            {(data.snapshots?.snapshots?.length || 0) > visibleSnapshots && (
               <Button variant="outline" onClick={() => setVisibleSnapshots(count => count + 10)}>
                 Load more
               </Button>

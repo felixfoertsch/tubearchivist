@@ -9,7 +9,6 @@ import LoadingIndicator from '../components/LoadingIndicator';
 
 const Login = () => {
   const navigate = useNavigate();
-  const returnToNew = new URLSearchParams(window.location.search).get('next') === '/new/';
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -32,12 +31,11 @@ const Login = () => {
     const signedIn = loginResponse.status === 204;
 
     if (signedIn) {
-      if (returnToNew) window.location.assign('/new/');
-      else navigate(Routes.Home);
+      navigate(Routes.Home);
     } else {
       const data = await loginResponse.json();
       setErrorMessage(data?.error || 'Unknown Error');
-      navigate(returnToNew ? '/login/?next=%2Fnew%2F' : Routes.Login);
+      navigate(Routes.Login);
     }
   };
 
@@ -59,8 +57,7 @@ const Login = () => {
           setWaitingForBackend(false);
           clearInterval(backendCheckInterval);
 
-          if (returnToNew) window.location.assign('/new/');
-          else navigate(Routes.Home);
+          navigate(Routes.Home);
         }
       } catch (error) {
         console.log('Checking backend availability: ', error);
@@ -73,7 +70,7 @@ const Login = () => {
     return () => {
       clearInterval(backendCheckInterval);
     };
-  }, [navigate, returnToNew]);
+  }, [navigate]);
 
   return (
     <>

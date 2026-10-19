@@ -31,7 +31,7 @@ test(
       const frame = await fetch(base + '/__preview__/frame?width=320');
       assert.equal(frame.status, 200);
       assert.match(frame.headers.get('content-security-policy'), /frame-src 'self'/);
-      assert.match(await frame.text(), /src="\/new\/"/);
+      assert.match(await frame.text(), /src="\/"/);
     } finally {
       await preview.close();
     }

@@ -22,7 +22,7 @@ export default defineConfig({
     assetsDir: 'assets',
     manifest: true,
     rollupOptions: {
-      input: { classic: 'index.html', new: 'new/index.html' },
+      input: { new: 'index.html', classic: 'old/index.html' },
       output: {
         entryFileNames: 'assets/[name].[hash].js',
         chunkFileNames: 'assets/[name].[hash].js',

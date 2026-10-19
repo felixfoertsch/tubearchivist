@@ -254,7 +254,7 @@ export function createPreviewServer({ dist = defaultDist, fixtureMedia } = {}) {
           );
           response.writeHead(200, { 'Content-Type': mime['.html'] });
           return response.end(
-            `<!doctype html><title>LOCAL FIXTURES ONLY</title><p>LOCAL FIXTURES ONLY · ${width}px</p><iframe title="Local modern UI" src="/new/" style="width:${width}px;height:850px;border:1px solid"></iframe>`,
+            `<!doctype html><title>LOCAL FIXTURES ONLY</title><p>LOCAL FIXTURES ONLY · ${width}px</p><iframe title="Local modern UI" src="/" style="width:${width}px;height:850px;border:1px solid"></iframe>`,
           );
         }
         if (path === '/__preview__/reset' && request.method === 'POST') {
@@ -1013,7 +1013,7 @@ export function createPreviewServer({ dist = defaultDist, fixtureMedia } = {}) {
         return send(405, { error: 'Static GET/HEAD only' });
       const root = await realpath(dist);
       let relative = decoded.replace(/^\//, '');
-      if (decoded === '/new' || decoded.startsWith('/new/')) relative = 'new/index.html';
+      if (decoded === '/old' || decoded.startsWith('/old/')) relative = 'old/index.html';
       else if (!extname(relative) && !decoded.startsWith('/assets/')) relative = 'index.html';
       const candidate = await realpath(resolve(root, relative));
       if (!candidate.startsWith(root + sep)) return send(403, { error: 'Unsafe asset path' });
@@ -1075,6 +1075,6 @@ if (
   });
   await preview.listen(port);
   console.log(
-    `LOCAL FIXTURES ONLY: http://127.0.0.1:${port}/new/ PID ${process.pid}; dist ${process.env.PREVIEW_DIST || defaultDist}`,
+    `LOCAL FIXTURES ONLY: http://127.0.0.1:${port}/ PID ${process.pid}; dist ${process.env.PREVIEW_DIST || defaultDist}`,
   );
 }

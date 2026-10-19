@@ -106,21 +106,25 @@ export default function Login() {
             {error && (
               <div role="alert" className="space-y-2">
                 <p>{error}</p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setError('');
-                    setChecking(true);
-                    setRetry(value => value + 1);
-                  }}
-                >
-                  Retry connection
-                </Button>
-                <p className="text-sm text-muted-foreground">
-                  Verify TA_HOST matches {window.location.origin} and Redis is reachable. See
-                  installation guide.
-                </p>
+                {!error.startsWith('Login failed') && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setError('');
+                        setChecking(true);
+                        setRetry(value => value + 1);
+                      }}
+                    >
+                      Retry connection
+                    </Button>
+                    <p className="text-sm text-muted-foreground">
+                      Verify TA_HOST matches {window.location.origin} and Redis is reachable. See
+                      installation guide.
+                    </p>
+                  </>
+                )}
               </div>
             )}
             {checking && <p role="status">Checking session…</p>}
@@ -131,7 +135,7 @@ export default function Login() {
         </CardContent>
       </Card>
       <nav aria-label="Login links" className="flex flex-wrap gap-4 text-sm underline">
-        <a href="/login/">Classic UI</a>
+        <a href="/old/login/">Classic UI</a>
         <a href="https://github.com/tubearchivist/tubearchivist" target="_blank" rel="noreferrer">
           GitHub
         </a>

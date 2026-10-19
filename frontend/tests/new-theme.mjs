@@ -10,8 +10,8 @@ import ts from 'typescript';
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 test('theme consumer builds separate CSS and runtime variable bridges', () => {
   const manifest = JSON.parse(read('../dist/.vite/manifest.json'));
-  const classic = manifest['index.html'];
-  const modern = manifest['new/index.html'];
+  const classic = manifest['old/index.html'];
+  const modern = manifest['index.html'];
   assert.ok(!classic.css.some(path => modern.css.includes(path)));
   const css = read(`../dist/${modern.css[0]}`);
   assert.match(css, /--primary:oklch\((?:0?\.6007|60\.07%)/);
