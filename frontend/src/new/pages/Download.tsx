@@ -32,6 +32,7 @@ import { nextPage } from '../pagination';
 import { DownloadItem } from '../components/DownloadItem';
 import { Collection } from '../components/Collection';
 import TaskNotifications from '../components/TaskNotifications';
+import { useTaskStore } from '../lib/tasks';
 
 import type { DownloadResponseType } from '../lib/download';
 
@@ -67,6 +68,9 @@ export function Download() {
     loaded: boolean;
   }>();
   const [regexRetry, setRegexRetry] = useState(0);
+  const tasks = useTaskStore(state => state.tasks);
+  const taskAdvanced = useTaskStore(state => state.advanced);
+  const activeTask = tasks.find(task => task.youtube_id);
   const ignored =
     params.get('ignored') === null
       ? userConfig.show_ignored_only
@@ -116,7 +120,18 @@ export function Download() {
     return () => {
       active = false;
     };
-  }, [admin, apiPage, channel, type, errorFilter, ignored, search, refresh, queryKey]);
+  }, [
+    admin,
+    apiPage,
+    channel,
+    type,
+    errorFilter,
+    ignored,
+    search,
+    refresh,
+    taskAdvanced,
+    queryKey,
+  ]);
   useEffect(() => {
     let active = true;
     if (!admin || !channel) {
@@ -242,7 +257,7 @@ export function Download() {
           {notice}
         </p>
       )}
-      <TaskNotifications pageName="download" update onComplete={refreshList} />
+      <TaskNotifications />
       <div className="flex flex-wrap gap-2">
         <NativeSelect
           aria-label="Download view"
@@ -602,6 +617,7 @@ export function Download() {
           <DownloadItem
             key={`${item.channel_id}_${item.timestamp}_${item.youtube_id}`}
             download={item}
+            task={activeTask?.youtube_id === item.youtube_id ? activeTask : undefined}
             grid={userConfig.view_style_downloads === ViewStylesEnum.Grid}
             refresh={refreshList}
           />

@@ -29,7 +29,7 @@ import VideoCollection from '../components/VideoCollection';
 import EmbeddableVideoPlayer from '../components/EmbeddableVideoPlayer';
 import PlaylistList from '../components/PlaylistList';
 import { PlayerText } from '../components/Comments';
-import TaskNotifications from '../components/TaskNotifications';
+import { useTaskStore } from '../lib/tasks';
 import { requestedPage, nextPage } from '../pagination';
 import NewRoutes from '../routes';
 import { channelNumber, errorMessage, isoDate } from '../videoMetadata';
@@ -62,7 +62,8 @@ export default function Channel() {
   const type = (
     tab === 'streams' ? 'streams' : tab === 'shorts' ? 'shorts' : 'videos'
   ) as VideoTypes;
-  const [count, setCount] = useState(0);
+  const [manualCount, setCount] = useState(0);
+  const count = manualCount + useTaskStore(state => state.finished);
   const [channelResult, setChannelResult] = useState<{
     id: string;
     data?: Channel;
@@ -256,7 +257,6 @@ export default function Channel() {
   ];
   return (
     <main className="space-y-4">
-      {admin && <TaskNotifications pageName="channel" includeReindex onComplete={refresh} />}
       <h1 className="text-xl font-semibold">{channel.channel_name}</h1>
       <img
         className="max-h-64 w-full rounded-lg object-cover"

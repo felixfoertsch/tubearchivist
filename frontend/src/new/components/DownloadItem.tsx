@@ -8,13 +8,17 @@ import NewRoutes from '../routes';
 import { Button } from '../ui/button';
 import { CollectionImage, CollectionItem } from './Collection';
 import type { DownloadRecord } from '../lib/download';
+import type { Task } from '../lib/tasks';
+import { TaskProgress } from './TaskNotifications';
 
 export function DownloadItem({
   download,
   refresh,
+  task,
   grid = false,
 }: {
   download: DownloadRecord;
+  task?: Task;
   refresh: () => void;
   grid?: boolean;
 }) {
@@ -178,6 +182,7 @@ export function DownloadItem({
         {download.published && `${isoDate(download.published)} · `}
         {download.duration} · {download.youtube_id}
       </p>
+      {task && <TaskProgress task={task} label={download.title} />}
       {download.message && <p className="text-sm text-foreground">{download.message}</p>}
       {error && (
         <p role="alert" className="text-xs text-foreground">

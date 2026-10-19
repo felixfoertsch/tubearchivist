@@ -70,6 +70,7 @@ class NotificationSerializer(serializers.Serializer):
     messages = serializers.ListField(child=serializers.CharField())
     progress = serializers.FloatField(required=False)
     command = serializers.ChoiceField(choices=["STOP", "KILL"], required=False)
+    youtube_id = serializers.CharField(required=False)
 
 
 class NotificationQueryFilterSerializer(serializers.Serializer):

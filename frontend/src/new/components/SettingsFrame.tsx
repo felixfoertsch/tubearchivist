@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import useIsAdmin from '../../functions/useIsAdmin';
 import { Card } from '../ui/card';
-import TaskNotifications from './TaskNotifications';
 
 export default function SettingsFrame({
   title,
@@ -17,7 +16,6 @@ export default function SettingsFrame({
     <section className="mx-auto w-full max-w-6xl space-y-4 p-3 sm:p-5">
       <title>{`TA | ${title}`}</title>
       <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-      {isAdmin && <TaskNotifications pageName="all" includeReindex />}
       {admin && !isAdmin ? (
         <Card className="p-4">
           <p role="alert">Administrator access required.</p>

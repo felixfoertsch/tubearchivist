@@ -7,7 +7,7 @@ import useIsAdmin from '../../functions/useIsAdmin';
 import { useUserConfigStore } from '../../stores/UserConfigStore';
 import { Button } from '../ui/button';
 import { ChannelsList } from '../components/ChannelsList';
-import TaskNotifications from '../components/TaskNotifications';
+import { useTaskStore } from '../lib/tasks';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
 import { NativeSelect } from '../ui/native-select';
@@ -29,7 +29,8 @@ export default function Channels() {
   const [params, setParams] = useSearchParams();
   const parsed = requestedPage(params.get('page'), userConfig.page_size);
   const page = parsed ?? 1;
-  const [count, setCount] = useState(0);
+  const [manualCount, setCount] = useState(0);
+  const count = manualCount + useTaskStore(state => state.finished);
   const [result, setResult] = useState<{ key: string; response?: Response; error?: string }>();
   const [filter, setFilter] = useState(false);
   const [nameFilter, setNameFilter] = useState('');
@@ -128,7 +129,6 @@ export default function Channels() {
           </details>
         )}
       </header>
-      {admin && <TaskNotifications key={count} pageName="all" onComplete={refresh} />}
       {error && <p role="alert">{error}</p>}
       {parsed === null && <p role="alert">Invalid page. Showing first page.</p>}
       <div className="flex flex-wrap items-center gap-2">

@@ -115,12 +115,28 @@ export function assertTaskNotifications(
           task.command !== null &&
           typeof task.command !== 'boolean' &&
           task.command !== 'STOP' &&
-          task.command !== 'KILL')
+          task.command !== 'KILL') ||
+        (task.youtube_id !== undefined && typeof task.youtube_id !== 'string')
       );
     })
   )
     throw new Error('Invalid task notification response');
   return value as import('../../api/loader/loadNotifications').NotificationResponseType;
+}
+
+// finished: every task ended. advanced: finished, or the downloading video changed.
+export function taskTransition(
+  previous: { youtube_id?: string }[],
+  next: { youtube_id?: string }[],
+): { finished: boolean; advanced: boolean } {
+  const finished = previous.length > 0 && next.length === 0;
+  const before = previous.find(task => task.youtube_id)?.youtube_id;
+  const after = next.find(task => task.youtube_id)?.youtube_id;
+  return { finished, advanced: finished || (before !== undefined && before !== after) };
+}
+
+export function taskPercent(progress: number | undefined): number {
+  return Math.round(Math.min(1, Math.max(0, progress ?? 0)) * 100);
 }
 
 export function pollWhileActive<T>(

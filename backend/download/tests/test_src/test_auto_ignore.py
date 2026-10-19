@@ -117,3 +117,24 @@ def test_ignored_video_is_skipped_without_failing_queue(
             )
         else:
             video.assert_not_called()
+
+
+def test_progress_notifications_name_active_video():
+    downloader = object.__new__(VideoDownloader)
+    downloader.task = Mock()
+    downloader._notify(VIDEO, "Validate download format")
+    assert downloader.task.send_progress.call_args.kwargs["youtube_id"] == (
+        "podcast-id"
+    )
+    downloader._progress_hook(
+        {
+            "info_dict": {"id": "hook-id", "title": "T"},
+            "_total_bytes_str": "1MiB",
+            "_percent_str": "5%",
+            "_speed_str": "1MiB/s",
+            "_eta_str": "1s",
+        }
+    )
+    assert downloader.task.send_progress.call_args.kwargs["youtube_id"] == (
+        "hook-id"
+    )

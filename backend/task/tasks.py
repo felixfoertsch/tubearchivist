@@ -60,7 +60,12 @@ class BaseTask(Task):
         Notifications(self.name).send(task_id, task_title)
 
     def send_progress(
-        self, message_lines, progress=False, title=False, level="info"
+        self,
+        message_lines,
+        progress=False,
+        title=False,
+        level="info",
+        youtube_id=None,
     ):
         """send progress message"""
         message, key = self._build_message(level=level)
@@ -72,6 +77,8 @@ class BaseTask(Task):
         )
         if title:
             message["title"] = title
+        if youtube_id:
+            message["youtube_id"] = youtube_id
 
         RedisArchivist().set_message(key, message)
 

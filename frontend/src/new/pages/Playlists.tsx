@@ -15,7 +15,7 @@ import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
 import { NativeSelect } from '../ui/native-select';
 import { PlaylistList } from '../components/PlaylistList';
-import TaskNotifications from '../components/TaskNotifications';
+import { useTaskStore } from '../lib/tasks';
 
 export default function Playlists() {
   const { userConfig, setUserConfig } = useUserConfigStore();
@@ -26,7 +26,8 @@ export default function Playlists() {
   const [playlists, setPlaylists] = useState<PlaylistType[]>();
   const [pagination, setPagination] =
     useState<NonNullable<Awaited<ReturnType<typeof loadPlaylistList>>['data']>['paginate']>();
-  const [revision, setRevision] = useState(0);
+  const [manualRevision, setRevision] = useState(0);
+  const revision = manualRevision + useTaskStore(state => state.finished);
   const [ids, setIds] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
@@ -175,7 +176,6 @@ export default function Playlists() {
           </div>
         )}
       </header>
-      {isAdmin && <TaskNotifications key={revision} pageName="all" onComplete={refresh} />}
       {error && (
         <p role="alert" className="text-sm text-foreground">
           {error}
