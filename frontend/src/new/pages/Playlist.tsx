@@ -140,7 +140,7 @@ export default function Playlist() {
       <section className="space-y-3">
         <h1 className="text-xl font-semibold">Playlist unavailable</h1>
         <p role="alert">{currentLoadError.message}</p>
-        <Button variant="outline" onClick={refresh}>
+        <Button variant="default" onClick={refresh}>
           Retry
         </Button>
       </section>
@@ -210,7 +210,7 @@ export default function Playlist() {
             {isAdmin && channel && (
               <Button
                 size="sm"
-                variant="outline"
+                variant={channel.channel_subscribed ? 'secondary' : 'default'}
                 disabled={pending}
                 onClick={() =>
                   void mutate(() =>
@@ -225,7 +225,7 @@ export default function Playlist() {
             {isAdmin && (
               <Button
                 size="sm"
-                variant="outline"
+                variant={playlist.playlist_subscribed ? 'secondary' : 'default'}
                 disabled={pending}
                 onClick={() =>
                   void mutate(() =>
@@ -263,6 +263,7 @@ export default function Playlist() {
             <Button
               size="sm"
               variant="ghost"
+              aria-expanded={descriptionExpanded}
               onClick={() => setDescriptionExpanded(value => !value)}
             >
               {descriptionExpanded ? 'Show less' : 'Show more'}
@@ -273,7 +274,7 @@ export default function Playlist() {
       {currentLoadError && (
         <p role="alert">
           {currentLoadError.message}{' '}
-          <Button variant="outline" size="sm" onClick={refresh}>
+          <Button variant="default" size="sm" onClick={refresh}>
             Retry
           </Button>
         </p>
@@ -291,7 +292,7 @@ export default function Playlist() {
           <>
             <Button
               size="sm"
-              variant="outline"
+              variant="default"
               disabled={pending}
               onClick={() =>
                 void mutate(() => updateWatchedState({ id: playlistId, is_watched: true }))
@@ -301,7 +302,7 @@ export default function Playlist() {
             </Button>
             <Button
               size="sm"
-              variant="outline"
+              variant="default"
               disabled={pending}
               onClick={() =>
                 void mutate(() => updateWatchedState({ id: playlistId, is_watched: false }))
@@ -319,7 +320,7 @@ export default function Playlist() {
               <>
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="default"
                   disabled={pending || custom}
                   onClick={() => void scheduleReindex(false)}
                 >
@@ -327,7 +328,7 @@ export default function Playlist() {
                 </Button>
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="default"
                   disabled={pending}
                   onClick={() => void scheduleReindex(true)}
                 >
@@ -356,7 +357,7 @@ export default function Playlist() {
             {!deleteChoice ? (
               <Button
                 size="sm"
-                variant="outline"
+                variant="destructive"
                 disabled={pending}
                 onClick={() => setDeleteChoice(true)}
               >
@@ -367,7 +368,7 @@ export default function Playlist() {
                 <span>Delete {playlist.playlist_name}?</span>
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="destructive"
                   disabled={pending}
                   onClick={() => void remove(false)}
                 >
@@ -375,7 +376,7 @@ export default function Playlist() {
                 </Button>
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="destructive"
                   disabled={pending}
                   onClick={() => void remove(true)}
                 >

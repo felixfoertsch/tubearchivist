@@ -189,40 +189,55 @@ const Download = () => {
         <div id="downloadControl"></div>
         <div className="info-box info-box-3">
           <div className="icon-text">
-            <img
-              id="rescan-icon"
-              className={rescanPending ? 'rotate-img' : ''}
+            <button
+              type="button"
+              className="classic-icon-button"
+              aria-label="Rescan subscriptions"
               onClick={async () => {
                 setRescanPending(!rescanPending);
                 await updateTaskByName('update_subscribed');
               }}
-              src={iconRescan}
-              alt="rescan-icon"
-            />
+            >
+              <img
+                id="rescan-icon"
+                className={rescanPending ? 'rotate-img' : ''}
+                src={iconRescan}
+                alt=""
+              />
+            </button>
             <p>Rescan subscriptions</p>
           </div>
           <div className="icon-text">
-            <img
-              id="download-icon"
-              className={downloadPending ? 'bounce-img' : ''}
+            <button
+              type="button"
+              className="classic-icon-button"
+              aria-label="Start download"
               onClick={async () => {
                 setDownloadPending(!downloadPending);
                 await updateTaskByName('download_pending');
               }}
-              src={iconDownload}
-              alt="download-icon"
-            />
+            >
+              <img
+                id="download-icon"
+                className={downloadPending ? 'bounce-img' : ''}
+                src={iconDownload}
+                alt=""
+              />
+            </button>
             <p>Start download</p>
           </div>
           <div className="icon-text">
-            <img
-              className={showHiddenForm ? 'pulse-img' : ''}
+            <button
+              type="button"
+              className="classic-icon-button"
+              aria-label="Add to download queue"
+              aria-expanded={showHiddenForm}
               onClick={() => {
                 setShowHiddenForm(!showHiddenForm);
               }}
-              src={iconAdd}
-              alt="add-icon"
-            />
+            >
+              <img className={showHiddenForm ? 'pulse-img' : ''} src={iconAdd} alt="" />
+            </button>
             <p>Add to download queue</p>
 
             {showHiddenForm && (
@@ -352,44 +367,58 @@ const Download = () => {
             {isGridView && (
               <div className="grid-count">
                 {gridItems < 7 && (
-                  <img
-                    src={iconAdd}
+                  <button
+                    type="button"
+                    className="classic-icon-button"
+                    aria-label="Increase grid columns"
                     onClick={() => {
                       handleUserConfigUpdate({ grid_items: gridItems + 1 });
                     }}
-                    alt="grid plus row"
-                  />
+                  >
+                    <img src={iconAdd} alt="" />
+                  </button>
                 )}
                 {gridItems > 3 && (
-                  <img
-                    src={iconSubstract}
+                  <button
+                    type="button"
+                    className="classic-icon-button"
+                    aria-label="Decrease grid columns"
                     onClick={() => {
                       handleUserConfigUpdate({ grid_items: gridItems - 1 });
                     }}
-                    alt="grid minus row"
-                  />
+                  >
+                    <img src={iconSubstract} alt="" />
+                  </button>
                 )}
               </div>
             )}
 
-            <img
-              src={iconGridView}
+            <button
+              type="button"
+              className="classic-icon-button"
+              aria-label="Grid view"
+              aria-pressed={isGridView}
               onClick={() => {
                 handleUserConfigUpdate({
                   view_style_downloads: ViewStylesEnum.Grid as ViewStylesType,
                 });
               }}
-              alt="grid view"
-            />
-            <img
-              src={iconListView}
+            >
+              <img src={iconGridView} alt="" />
+            </button>
+            <button
+              type="button"
+              className="classic-icon-button"
+              aria-label="List view"
+              aria-pressed={viewStyle === ViewStylesEnum.List}
               onClick={() => {
                 handleUserConfigUpdate({
                   view_style_downloads: ViewStylesEnum.List as ViewStylesType,
                 });
               }}
-              alt="list view"
-            />
+            >
+              <img src={iconListView} alt="" />
+            </button>
           </div>
         </div>
         <h3>
@@ -526,6 +555,10 @@ const Download = () => {
                 </div>
               )}
             </div>
+            <p>
+              Forget removes queue entries matching status, channel and type above. Forget ignores
+              search text and error-state filters. Downloaded files are not deleted.
+            </p>
             <div className="button-box">
               {showDeleteConfirm ? (
                 <>
@@ -541,7 +574,7 @@ const Download = () => {
                       setShowDeleteConfirm(false);
                     }}
                   >
-                    Confirm
+                    Forget matching videos
                   </Button>
                   <Button onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
                 </>

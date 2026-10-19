@@ -208,7 +208,7 @@ function AdminSettings() {
       )}
       {!data ? (
         error ? (
-          <Button variant="outline" disabled={!!pending} onClick={() => void refresh()}>
+          <Button variant="default" disabled={!!pending} onClick={() => void refresh()}>
             Retry loading application settings
           </Button>
         ) : (
@@ -385,7 +385,11 @@ function AdminSettings() {
             )}
             <div className="flex flex-wrap gap-2">
               {!cookieEntry && (
-                <Button variant="outline" onClick={() => setCookieEntry(true)}>
+                <Button
+                  variant="outline"
+                  aria-expanded={cookieEntry}
+                  onClick={() => setCookieEntry(true)}
+                >
                   Enter cookie
                 </Button>
               )}
@@ -395,7 +399,7 @@ function AdminSettings() {
                     {cookieReveal ? 'Mask cookie entry' : 'Reveal cookie entry'}
                   </Button>
                   <Button
-                    variant="secondary"
+                    variant="default"
                     disabled={!!pending || !cookieDraft}
                     onClick={() =>
                       void mutate('Cookie update', async () => {
@@ -426,7 +430,7 @@ function AdminSettings() {
               {data.cookie.cookie_enabled && (
                 <>
                   <Button
-                    variant="outline"
+                    variant="default"
                     disabled={!!pending}
                     onClick={() =>
                       void mutate('Cookie validation', () =>
@@ -439,7 +443,7 @@ function AdminSettings() {
                     Validate
                   </Button>
                   <Button
-                    variant="outline"
+                    variant="destructive"
                     disabled={!!pending}
                     onClick={() =>
                       void mutate(
@@ -475,7 +479,7 @@ function AdminSettings() {
                 {tokenVisible ? 'Hide' : 'Reveal'}
               </Button>
               <Button
-                variant="outline"
+                variant="destructive"
                 disabled={!!pending}
                 onClick={() =>
                   void mutate(
@@ -524,7 +528,7 @@ function AdminSettings() {
                 : 'No snapshot policy available.'}
             </p>
             <Button
-              variant="secondary"
+              variant="default"
               disabled={!!pending || !data.settings.application.enable_snapshot}
               onClick={() =>
                 void mutate('create snapshot', () =>
@@ -543,7 +547,7 @@ function AdminSettings() {
                   {snapshot.state}
                 </span>
                 <Button
-                  variant="outline"
+                  variant="destructive"
                   disabled={!!pending || snapshot.state !== 'SUCCESS'}
                   onClick={() =>
                     snapshot.state === 'SUCCESS' &&
@@ -664,7 +668,7 @@ function SettingField({
       {(dirty || saved) && (
         <div className="flex gap-2">
           <Button
-            variant="secondary"
+            variant="default"
             size="sm"
             disabled={busy || !dirty}
             onClick={() => void submit()}
@@ -848,7 +852,7 @@ function Membership() {
           {visible ? 'Hide' : 'Reveal'}
         </Button>
         {token && (
-          <Button variant="secondary" disabled={pending} onClick={() => void save('POST')}>
+          <Button variant="default" disabled={pending} onClick={() => void save('POST')}>
             Save
           </Button>
         )}
@@ -865,17 +869,17 @@ function Membership() {
           </Button>
         )}
         {stored && (
-          <Button variant="outline" disabled={pending} onClick={() => void save('DELETE')}>
+          <Button variant="destructive" disabled={pending} onClick={() => void save('DELETE')}>
             Delete
           </Button>
         )}
       </div>
       {stored && (
         <div className="flex gap-2">
-          <Button variant="outline" disabled={pending} onClick={() => void validate()}>
+          <Button variant="default" disabled={pending} onClick={() => void validate()}>
             Validate
           </Button>
-          <Button variant="outline" disabled={pending} onClick={() => void sync()}>
+          <Button variant="default" disabled={pending} onClick={() => void sync()}>
             Sync subscriptions
           </Button>
         </div>

@@ -53,7 +53,7 @@ function useTaskStop() {
         {(['stop', 'kill'] as const).map(command => (
           <Button
             key={command}
-            variant="outline"
+            variant="destructive"
             size="sm"
             disabled={stopping !== undefined}
             aria-label={`${command === 'stop' ? 'Stop' : 'Kill'} ${task.title}`}
@@ -220,7 +220,7 @@ export function TaskIndicator() {
           {queue.error && (
             <p role="alert" className="text-sm text-destructive">
               {queue.error}{' '}
-              <Button variant="outline" size="sm" onClick={() => setRetry(value => value + 1)}>
+              <Button variant="default" size="sm" onClick={() => setRetry(value => value + 1)}>
                 Retry
               </Button>
             </p>

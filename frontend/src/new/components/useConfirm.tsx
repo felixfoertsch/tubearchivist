@@ -15,6 +15,7 @@ type Confirmation = {
   title: string;
   description: string;
   actionLabel?: string;
+  variant?: 'default' | 'destructive';
 };
 type Request = Confirmation & {
   routeKey: string;
@@ -120,7 +121,7 @@ export function useConfirm() {
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              variant="secondary"
+              variant={request.variant ?? 'destructive'}
               onClick={event => {
                 event.preventDefault();
                 if (event.nativeEvent.isTrusted) settle(true);

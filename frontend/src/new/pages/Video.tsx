@@ -135,7 +135,7 @@ export default function Video() {
           <p>
             Could not load {key}: {error}
           </p>
-          <Button variant="outline" onClick={refresh}>
+          <Button variant="default" onClick={refresh}>
             Retry
           </Button>
         </div>
@@ -274,7 +274,7 @@ export default function Video() {
                   />
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button
-                      variant="outline"
+                      variant={item.player.watched ? 'secondary' : 'default'}
                       disabled={similarPending}
                       onClick={() =>
                         void mutateSimilar(() =>
@@ -289,7 +289,7 @@ export default function Video() {
                     </Button>
                     {Boolean(item.player.progress) && (
                       <Button
-                        variant="outline"
+                        variant="destructive"
                         disabled={similarPending}
                         onClick={event => {
                           clearProgressTrigger.current = event.currentTarget;
@@ -347,7 +347,7 @@ export default function Video() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={similarPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              variant="outline"
+              variant="destructive"
               disabled={similarPending}
               onClick={async event => {
                 event.preventDefault();

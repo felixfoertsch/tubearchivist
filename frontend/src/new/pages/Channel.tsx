@@ -266,7 +266,9 @@ export default function Channel() {
       <nav aria-label="Channel sections" className="flex flex-wrap gap-2">
         {tabs.map(t => (
           <Button key={t} variant={tab === t ? 'secondary' : 'outline'} asChild>
-            <Link to={tabPath(t)}>{t[0].toUpperCase() + t.slice(1)}</Link>
+            <Link aria-current={tab === t ? 'page' : undefined} to={tabPath(t)}>
+              {t[0].toUpperCase() + t.slice(1)}
+            </Link>
           </Button>
         ))}
         {admin && nav?.data?.has_pending && (
@@ -288,7 +290,7 @@ export default function Channel() {
           <span>{channel.channel_subs.toLocaleString()} subscribers</span>
           {admin && (
             <Button
-              variant="outline"
+              variant={channel.channel_subscribed ? 'secondary' : 'default'}
               disabled={pending}
               onClick={() =>
                 void mutate(() => updateChannelSubscription(channelId, !channel.channel_subscribed))
@@ -331,6 +333,7 @@ export default function Channel() {
               </label>
               <Button
                 variant={userConfig.view_style_playlist === 'grid' ? 'secondary' : 'outline'}
+                aria-pressed={userConfig.view_style_playlist === 'grid'}
                 disabled={pending}
                 onClick={() =>
                   void mutate(async () => {
@@ -346,6 +349,7 @@ export default function Channel() {
               </Button>
               <Button
                 variant={userConfig.view_style_playlist === 'list' ? 'secondary' : 'outline'}
+                aria-pressed={userConfig.view_style_playlist === 'list'}
                 disabled={pending}
                 onClick={() =>
                   void mutate(async () => {
@@ -370,7 +374,7 @@ export default function Channel() {
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button
-                  variant="outline"
+                  variant="default"
                   disabled={pending}
                   onClick={() =>
                     void mutate(() => updateWatchedState({ id: channelId, is_watched: true }))
@@ -379,7 +383,7 @@ export default function Channel() {
                   Mark as watched
                 </Button>
                 <Button
-                  variant="outline"
+                  variant="default"
                   disabled={pending}
                   onClick={() =>
                     void mutate(() => updateWatchedState({ id: channelId, is_watched: false }))
@@ -545,7 +549,7 @@ function About({
           <PlayerText>{channel.channel_description ?? ''}</PlayerText>
         </p>
         {channel.channel_description && (
-          <Button variant="outline" onClick={() => setDesc(v => !v)}>
+          <Button variant="outline" aria-expanded={desc} onClick={() => setDesc(v => !v)}>
             {desc ? 'Show less' : 'Show more'}
           </Button>
         )}
@@ -561,7 +565,7 @@ function About({
         {admin && (
           <div className="flex flex-wrap gap-2">
             <Button
-              variant="outline"
+              variant="destructive"
               disabled={pending}
               onClick={async () => {
                 if (pending) return;
@@ -588,7 +592,7 @@ function About({
               Delete Channel
             </Button>
             <Button
-              variant="outline"
+              variant="default"
               disabled={pending}
               onClick={() =>
                 void mutate(() =>
@@ -599,7 +603,7 @@ function About({
               Reindex
             </Button>
             <Button
-              variant="outline"
+              variant="default"
               disabled={pending}
               onClick={() =>
                 void mutate(() =>
@@ -623,7 +627,7 @@ function About({
             <Input value={format} disabled={pending} onChange={e => setFormat(e.target.value)} />
             <div className="flex gap-2">
               <Button
-                variant="outline"
+                variant="default"
                 disabled={pending}
                 onClick={() => void overwrite('download_format', format || null)}
               >
@@ -660,7 +664,7 @@ function About({
             />
             <div className="flex gap-2">
               <Button
-                variant="outline"
+                variant="default"
                 disabled={pending}
                 onClick={() => saveNumber('autodelete_days', days)}
               >
@@ -734,7 +738,7 @@ function About({
               />
               <div className="flex gap-2">
                 <Button
-                  variant="outline"
+                  variant="default"
                   disabled={pending}
                   onClick={() =>
                     saveNumber(
@@ -814,7 +818,7 @@ function About({
           </p>
           <div className="flex gap-2">
             <Button
-              variant="outline"
+              variant="default"
               disabled={pending}
               onClick={async () => {
                 if (pending) return;
@@ -875,7 +879,7 @@ function About({
           </p>
           <div className="flex gap-2">
             <Button
-              variant="outline"
+              variant="default"
               disabled={pending}
               onClick={() => void overwrite('auto_ignore_filter', filter || null)}
             >

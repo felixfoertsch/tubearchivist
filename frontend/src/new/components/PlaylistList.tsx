@@ -74,7 +74,7 @@ function PlaylistListItem({
   const action = playlist.playlist_type !== 'custom' && isAdmin && (
     <Button
       size="sm"
-      variant="outline"
+      variant={playlist.playlist_subscribed ? 'secondary' : 'default'}
       disabled={pending}
       onClick={() => void subscribed(!playlist.playlist_subscribed)}
     >

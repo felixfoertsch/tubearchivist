@@ -74,6 +74,7 @@ const DownloadListItem = ({ download, setRefresh }: DownloadListItemProps) => {
               <div className="button-box">
                 <Button
                   label="Forget"
+                  className="danger-button"
                   onClick={async () => {
                     await deleteDownloadById(download.youtube_id);
                     setRefresh();

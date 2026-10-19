@@ -97,7 +97,7 @@ export default function Search() {
           onChange={event => changeQuery(event.target.value)}
           placeholder="Search titles, channels, playlists or subtitles"
         />
-        <Button variant="outline" type="submit">
+        <Button variant="default" type="submit">
           Search
         </Button>
       </form>
@@ -109,12 +109,7 @@ export default function Search() {
         </p>
         <div className="flex flex-wrap gap-2">
           {examples.map(example => (
-            <Button
-              key={example}
-              variant="secondary"
-              size="sm"
-              onClick={() => changeQuery(example)}
-            >
+            <Button key={example} variant="outline" size="sm" onClick={() => changeQuery(example)}>
               {example}
             </Button>
           ))}
@@ -177,7 +172,7 @@ export default function Search() {
                   </p>
                   <SearchHighlight value={subtitle.subtitle_line} />
                   <Button
-                    variant="outline"
+                    variant="default"
                     size="sm"
                     onClick={() =>
                       setParams(previous => {

@@ -73,6 +73,7 @@ export function VideoCollection({
           title: `${operation === 'redownload' ? 'Redownload' : 'Reindex'} selected videos?`,
           description: `Apply this action to ${ids.length} selected videos.`,
           actionLabel: operation === 'redownload' ? 'Redownload' : 'Reindex',
+          variant: 'default',
         }))
       )
         return;
@@ -128,7 +129,12 @@ export function VideoCollection({
       {dialog}
       {bulk && isAdmin && (
         <fieldset disabled={pending} className="flex flex-wrap items-center gap-2 text-sm">
-          <Button variant="outline" size="sm" onClick={() => setShowSelection(value => !value)}>
+          <Button
+            variant="outline"
+            size="sm"
+            aria-expanded={showSelection}
+            onClick={() => setShowSelection(value => !value)}
+          >
             {showSelection ? 'Hide selection' : 'Select videos'}
           </Button>
           {showSelection && (
@@ -160,7 +166,7 @@ export function VideoCollection({
                 <option value="redownload">Redownload</option>
               </NativeSelect>
               <Button
-                variant="outline"
+                variant="default"
                 size="sm"
                 disabled={!selection.length}
                 onClick={() => void apply()}
@@ -241,7 +247,7 @@ export function VideoCollection({
                             <Button
                               key={direction}
                               size="sm"
-                              variant="outline"
+                              variant={direction === 'remove' ? 'destructive' : 'outline'}
                               disabled={pending}
                               onClick={() => void reorderVideo(video, direction)}
                             >

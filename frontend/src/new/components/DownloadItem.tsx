@@ -94,7 +94,7 @@ export function DownloadItem({
             <>
               <Button
                 size="sm"
-                variant="outline"
+                variant="default"
                 disabled={pending}
                 onClick={() =>
                   void run(() => updateDownloadQueueStatusById(download.youtube_id, 'pending'))
@@ -104,7 +104,7 @@ export function DownloadItem({
               </Button>
               <Button
                 size="sm"
-                variant="ghost"
+                variant="destructive"
                 disabled={pending}
                 onClick={() => {
                   const id = download.youtube_id;
@@ -122,7 +122,7 @@ export function DownloadItem({
             <>
               <Button
                 size="sm"
-                variant="outline"
+                variant="destructive"
                 disabled={pending}
                 onClick={() =>
                   void run(() => updateDownloadQueueStatusById(download.youtube_id, 'ignore'))
@@ -132,7 +132,7 @@ export function DownloadItem({
               </Button>
               <Button
                 size="sm"
-                variant="outline"
+                variant="destructive"
                 disabled={pending}
                 onClick={() => {
                   const id = download.youtube_id;
@@ -147,7 +147,7 @@ export function DownloadItem({
               </Button>
               <Button
                 size="sm"
-                variant="outline"
+                variant="default"
                 disabled={pending}
                 onClick={() =>
                   void run(() => updateDownloadQueueStatusById(download.youtube_id, 'priority'))
@@ -160,7 +160,7 @@ export function DownloadItem({
           {download.message && (
             <Button
               size="sm"
-              variant="outline"
+              variant="destructive"
               disabled={pending}
               onClick={() => {
                 const id = download.youtube_id;

@@ -110,7 +110,7 @@ export default function Login() {
                   <>
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="default"
                       onClick={() => {
                         setError('');
                         setChecking(true);
@@ -128,7 +128,7 @@ export default function Login() {
               </div>
             )}
             {checking && <p role="status">Checking session…</p>}
-            <Button variant="secondary" type="submit" disabled={busy || checking}>
+            <Button variant="default" type="submit" disabled={busy || checking}>
               {busy ? 'Signing in…' : 'Login'}
             </Button>
           </form>

@@ -14,7 +14,7 @@ test('theme consumer builds separate CSS and runtime variable bridges', () => {
   const modern = manifest['index.html'];
   assert.ok(!classic.css.some(path => modern.css.includes(path)));
   const css = read(`../dist/${modern.css[0]}`);
-  assert.match(css, /--primary:oklch\((?:0?\.6007|60\.07%)/);
+  assert.match(css, /--primary:oklch\((?:0?\.525|52\.5%)/);
   assert.match(css, /--primary:oklch\((?:0?\.6496|64\.96%)/);
   assert.match(css, /font-family:var\(--theme-font-sans\)/);
   assert.match(css, /var\(--theme-shadow-sm\)/);

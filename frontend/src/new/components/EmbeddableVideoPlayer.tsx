@@ -78,7 +78,7 @@ export default function EmbeddableVideoPlayer({ videoId }: Props) {
         {error && (
           <div role="alert">
             <p>{error}</p>
-            <Button variant="outline" onClick={refresh}>
+            <Button variant="default" onClick={refresh}>
               Retry
             </Button>
           </div>
@@ -89,9 +89,8 @@ export default function EmbeddableVideoPlayer({ videoId }: Props) {
             <VideoPlayer video={current} embed autoplay onWatchStateChanged={refresh} />
             <div className="flex flex-wrap items-center gap-3">
               <Button
-                variant="outline"
+                variant={current.player.watched ? 'secondary' : 'default'}
                 disabled={pending}
-                aria-pressed={current.player.watched}
                 onClick={async () => {
                   setPending(true);
                   setError('');

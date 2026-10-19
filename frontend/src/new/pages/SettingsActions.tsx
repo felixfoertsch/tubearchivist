@@ -76,7 +76,7 @@ function Action({
             </label>
           </div>
         )}
-        <Button type="submit" variant={danger ? 'outline' : 'secondary'} disabled={pending}>
+        <Button type="submit" variant={danger ? 'destructive' : 'default'} disabled={pending}>
           {pending ? 'Queuing…' : title}
         </Button>
         {error && (
@@ -192,7 +192,7 @@ function Actions() {
                     <td className="p-2">{backup.reason}</td>
                     <td className="p-2">
                       <Button
-                        variant="outline"
+                        variant="destructive"
                         disabled={!!pending}
                         onClick={async () => {
                           if (pending) return;

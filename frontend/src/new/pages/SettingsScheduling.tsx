@@ -126,12 +126,12 @@ function ScheduleEditor({
           </label>
         )}
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" disabled={pending} type="submit">
+          <Button variant="default" disabled={pending} type="submit">
             {pending ? 'Saving…' : 'Save schedule'}
           </Button>
           {configKey && (
             <Button
-              variant="outline"
+              variant="default"
               type="button"
               disabled={pending || !current}
               onClick={() => void mutate(false, true)}
@@ -142,7 +142,7 @@ function ScheduleEditor({
           {current && (
             <Button
               type="button"
-              variant="outline"
+              variant="destructive"
               disabled={pending}
               onClick={() => void mutate(true)}
             >
@@ -310,7 +310,7 @@ function Scheduler() {
             Apprise sends notifications when tasks complete. Destination URLs may contain
             credentials.
           </p>
-          <Button variant="outline" onClick={() => setRevealed(!revealed)}>
+          <Button variant="outline" aria-expanded={revealed} onClick={() => setRevealed(!revealed)}>
             {revealed ? 'Hide destinations' : 'Reveal destinations'}
           </Button>
           {Object.entries(notifications).flatMap(([name, entry]) =>
@@ -323,7 +323,7 @@ function Scheduler() {
                   {entry.title}: {revealed ? destination : '••••••••'}
                 </span>
                 <Button
-                  variant="outline"
+                  variant="destructive"
                   disabled={pending}
                   onClick={() => void notificationAction('delete', name, destination)}
                 >
@@ -367,11 +367,11 @@ function Scheduler() {
               />
             </label>
             <div className="flex gap-2">
-              <Button variant="secondary" disabled={pending} type="submit">
+              <Button variant="default" disabled={pending} type="submit">
                 {pending ? 'Working…' : 'Save notification'}
               </Button>
               <Button
-                variant="outline"
+                variant="default"
                 type="button"
                 disabled={pending || !url}
                 onClick={() => void notificationAction('test')}
