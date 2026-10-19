@@ -10,14 +10,14 @@ import { ids } from './fixtures/preview-data.mjs';
 // HTTP fixture checks, not DOM/feature-parity checks. Mounted browser uses actual dist separately.
 test('local preview HTTP boundary, modes, permissions and in-memory writes', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'ta-preview-'));
-  await mkdir(join(directory, 'new'));
+  await mkdir(join(directory, 'old'));
   await mkdir(join(directory, 'assets'));
   await writeFile(
-    join(directory, 'index.html'),
+    join(directory, 'old/index.html'),
     '<!doctype html><title>Classic static test asset</title>',
   );
   await writeFile(
-    join(directory, 'new/index.html'),
+    join(directory, 'index.html'),
     '<!doctype html><title>Modern static test asset</title><body></body>',
   );
   await writeFile(join(directory, 'assets/test.js'), 'export const fixture = true;');
@@ -38,10 +38,10 @@ test('local preview HTTP boundary, modes, permissions and in-memory writes', asy
     };
   };
   try {
-    const modern = await fetch(base + '/new/channel/local');
+    const modern = await fetch(base + '/channel/local');
     assert.equal(modern.status, 200);
     assert.match(await modern.text(), /LOCAL FIXTURES ONLY/);
-    assert.equal((await fetch(base + '/')).status, 200);
+    assert.match(await (await fetch(base + '/old/')).text(), /Classic/);
     const asset = await fetch(base + '/assets/test.js');
     assert.equal(asset.status, 200);
     assert.match(asset.headers.get('content-type'), /javascript/);

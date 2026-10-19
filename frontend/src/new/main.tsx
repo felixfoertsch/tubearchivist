@@ -217,7 +217,7 @@ const router = createBrowserRouter([
     children: [
       { path: NewRoutes.Login, element: <Login /> },
       {
-        path: '/new/',
+        path: '/',
         loader: bootstrap,
         element: <App />,
         errorElement: <ErrorPage />,
@@ -236,10 +236,10 @@ const router = createBrowserRouter([
           { path: 'downloads', element: <Download /> },
           { path: 'dashboard', element: <SettingsDashboard /> },
           { path: 'settings', element: <Settings /> },
-          { path: 'settings/user', loader: () => redirect('/new/settings/#user') },
-          { path: 'settings/application', loader: () => redirect('/new/settings/#application') },
-          { path: 'settings/scheduling', loader: () => redirect('/new/settings/#scheduling') },
-          { path: 'settings/actions', loader: () => redirect('/new/settings/#actions') },
+          { path: 'settings/user', loader: () => redirect('/settings/#user') },
+          { path: 'settings/application', loader: () => redirect('/settings/#application') },
+          { path: 'settings/scheduling', loader: () => redirect('/settings/#scheduling') },
+          { path: 'settings/actions', loader: () => redirect('/settings/#actions') },
           { path: '*', element: <NotFound /> },
         ],
       },

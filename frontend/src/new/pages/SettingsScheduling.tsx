@@ -34,6 +34,13 @@ function ScheduleEditor({
   const configKey =
     name === 'check_reindex' ? 'days' : name === 'run_backup' ? 'rotate' : undefined;
   const [number, setNumber] = useState(configKey ? String(current?.config?.[configKey] ?? '') : '');
+  // Reset drafts when the server returns refreshed values.
+  const [shown, setShown] = useState(current);
+  if (shown !== current) {
+    setShown(current);
+    setSchedule(current?.schedule || '');
+    setNumber(configKey ? String(current?.config?.[configKey] ?? '') : '');
+  }
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState('');

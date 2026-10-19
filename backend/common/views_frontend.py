@@ -4,7 +4,7 @@ import mimetypes
 from pathlib import Path
 
 from django.conf import settings
-from django.http import Http404, HttpResponse
+from django.http import Http404, HttpResponse, HttpResponseRedirect
 from django.views.decorators.http import require_safe
 
 FRONTEND_ROOT = Path(settings.BASE_DIR, "static")
@@ -50,18 +50,27 @@ def django_static(_request, asset_path: str):
 
 
 @require_safe
-def new_frontend_index(_request, route: str = ""):
-    """Serve the separate Vite entry point, including client-side 404s."""
+def classic_frontend_index(_request, route: str = ""):
+    """Serve the classic Vite entry point, including client-side 404s."""
     if ".." in route.split("/") or "\\" in route:
         raise Http404
     response = _serve_file(
         FRONTEND_ROOT,
-        "new/index.html",
+        "old/index.html",
         "no-store, no-cache, must-revalidate",
     )
     response["Pragma"] = "no-cache"
     response["Expires"] = "0"
     return response
+
+
+@require_safe
+def legacy_new_redirect(request, route: str = ""):
+    """Keep old /new/ bookmarks working now the new UI lives at root."""
+    target = "/" + route.lstrip("/\\")
+    if request.META.get("QUERY_STRING"):
+        target += "?" + request.META["QUERY_STRING"]
+    return HttpResponseRedirect(target)
 
 
 @require_safe

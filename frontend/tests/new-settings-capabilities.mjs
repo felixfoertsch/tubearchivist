@@ -20,7 +20,7 @@ test('validated application saves update shared capabilities only on success', a
   let server;
   try {
     globalThis.window = {
-      location: { origin: 'http://localhost', pathname: '/new/settings/application/' },
+      location: { origin: 'http://localhost', pathname: '/settings/application/' },
     };
     globalThis.document = { cookie: '' };
     server = await createServer({
@@ -47,6 +47,24 @@ test('validated application saves update shared capabilities only on success', a
       await assert.rejects(saveApplicationSetting('application', 'enable_cast', false));
       assert.equal(useAppSettingsStore.getState().appSettingsConfig, saved);
     }
+    // Disabled snapshots make the backend serializer fail with 500; settings must still load.
+    const { loadApplicationSettings } = await server.ssrLoadModule(
+      '/src/new/lib/settingsApplication.ts',
+    );
+    const fixture = previewData();
+    globalThis.fetch = async url => {
+      const path = String(url);
+      if (path.endsWith('/snapshot/')) return new Response('{}', { status: 500 });
+      const body = path.endsWith('/token/')
+        ? { token: 'fixture-token' }
+        : path.endsWith('/cookie/')
+          ? fixture.cookie
+          : fixture.config;
+      return new Response(JSON.stringify(body), { status: 200 });
+    };
+    const loaded = await loadApplicationSettings();
+    assert.equal(loaded.snapshots, null);
+    assert.equal(loaded.token, 'fixture-token');
   } finally {
     await server?.close();
     await rm(cacheDir, { recursive: true, force: true });

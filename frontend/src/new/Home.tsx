@@ -164,7 +164,7 @@ export function Home() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-xl font-semibold">Home</h1>
         <Button variant="ghost" size="sm" asChild>
-          <a href="/">Classic Home</a>
+          <a href="/old/">Classic Home</a>
         </Button>
       </div>
       <EmbeddableVideoPlayer videoId={searchParams.get('videoId')} />

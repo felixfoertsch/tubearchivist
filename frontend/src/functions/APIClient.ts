@@ -61,7 +61,7 @@ const APIClient = async <T>(
     } as ApiError;
   }
 
-  if (window.location.pathname.startsWith('/new/')) {
+  if (!window.location.pathname.startsWith('/old/')) {
     if (response.status === 401) {
       window.location.assign(loginHref(window.location.pathname + window.location.search));
       throw new Error('Unauthorized: Redirecting to login.');

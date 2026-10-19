@@ -117,7 +117,11 @@ export async function loadApplicationSettings() {
     throw new Error('Invalid API token response.');
   return {
     settings: validateAppSettings(requireData(settings, 'Application settings')),
-    snapshots: validateSnapshots(requireData(snapshots, 'Snapshots')),
+    // Backend answers 500 while snapshots are disabled; keep other settings usable.
+    snapshots:
+      snapshots.status >= 200 && snapshots.status < 300 && snapshots.data !== undefined
+        ? validateSnapshots(snapshots.data)
+        : null,
     token: tokenData.token,
     cookie: validateCookie(requireData(cookie, 'Cookie status')),
   };
