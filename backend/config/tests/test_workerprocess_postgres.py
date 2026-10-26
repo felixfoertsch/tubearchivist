@@ -83,6 +83,7 @@ def stop_worker(process):
     if process.poll() is None:
         process.send_signal(signal.SIGKILL)
     process.wait(timeout=10)
+    assert process.poll() is not None
     process.stderr.close()
 
 
@@ -217,20 +218,6 @@ def record_delete(videos):
     return original_delete(videos)
 handler.delete_and_ignore = record_delete
 """
-
-
-@pytest.fixture
-def empty_worker_queue():
-    from django.db import connection
-
-    # Procrastinate tables are unmanaged; Django flush leaves them behind.
-    def clear():
-        with connection.cursor() as cursor:
-            cursor.execute("TRUNCATE procrastinate_jobs CASCADE")
-
-    clear()
-    yield
-    clear()
 
 
 def test_killed_download_retries_after_lease_and_fences_old_owner(
