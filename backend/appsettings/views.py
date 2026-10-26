@@ -211,9 +211,10 @@ class AppConfigApiView(ApiBaseView):
         serializer = AppConfigSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         validated_data = serializer.validated_data
-        if not check_admin(
-            request.user
-        ) and "pot_provider_url" in validated_data.get("downloads", {}):
+        if not check_admin(request.user) and {
+            "pot_provider_url",
+            "cookie_import",
+        }.intersection(validated_data.get("downloads", {})):
             return Response(
                 {"error": "Administrator access required."}, status=403
             )

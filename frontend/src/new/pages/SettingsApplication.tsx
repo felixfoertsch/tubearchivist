@@ -520,7 +520,7 @@ function AdminSettings() {
               />
               Enable Cast
             </label>
-            <Membership />
+            <Membership admin={canAdminister === true} />
           </SettingsApplicationSection>
         </>
       )}
@@ -652,7 +652,7 @@ function SettingField({
     </div>
   );
 }
-function Membership() {
+function Membership({ admin }: { admin: boolean }) {
   const { confirm, dialog } = useConfirm();
   const [token, setToken] = useState('');
   const [storedToken, setStoredToken] = useState('');
@@ -668,6 +668,7 @@ function Membership() {
     is_connected: boolean;
   }>();
   useEffect(() => {
+    if (!admin) return;
     const controller = new AbortController();
     requestJson<unknown>('/api/appsettings/membership/token/', { signal: controller.signal })
       .then(value => {
@@ -688,7 +689,7 @@ function Membership() {
         if (!controller.signal.aborted) setError(settingsError(caught));
       });
     return () => controller.abort();
-  }, []);
+  }, [admin]);
   async function save(method: 'POST' | 'DELETE') {
     if (pending) return;
     setPending(true);
@@ -787,54 +788,58 @@ function Membership() {
     <div className="grid gap-2 md:col-span-2">
       {dialog}
       <h3 className="font-medium">Membership</h3>
-      <p className="text-sm text-muted-foreground">
-        Membership API key stays masked until revealed.
-      </p>
-      <div className="flex flex-wrap gap-2">
-        <Input
-          type={visible ? 'text' : 'password'}
-          autoComplete="off"
-          aria-label="Membership API key"
-          value={token}
-          onChange={event => setToken(event.target.value)}
-        />
-        <Button variant="outline" onClick={() => setVisible(!visible)}>
-          {visible ? 'Hide' : 'Reveal'}
-        </Button>
-        {token && (
-          <Button variant="default" disabled={pending} onClick={() => void save('POST')}>
-            Save
-          </Button>
-        )}
-        {token !== storedToken && (
-          <Button
-            variant="outline"
-            disabled={pending}
-            onClick={() => {
-              setToken(storedToken);
-              setError('');
-            }}
-          >
-            Cancel
-          </Button>
-        )}
-        {stored && (
-          <Button variant="destructive" disabled={pending} onClick={() => void save('DELETE')}>
-            Delete
-          </Button>
-        )}
-      </div>
-      {stored && (
-        <div className="flex gap-2">
-          <Button variant="default" disabled={pending} onClick={() => void validate()}>
-            Validate
-          </Button>
-          <Button variant="default" disabled={pending} onClick={() => void sync()}>
-            Sync subscriptions
-          </Button>
-        </div>
+      {admin && (
+        <>
+          <p className="text-sm text-muted-foreground">
+            Membership API key stays masked until revealed.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Input
+              type={visible ? 'text' : 'password'}
+              autoComplete="off"
+              aria-label="Membership API key"
+              value={token}
+              onChange={event => setToken(event.target.value)}
+            />
+            <Button variant="outline" onClick={() => setVisible(!visible)}>
+              {visible ? 'Hide' : 'Reveal'}
+            </Button>
+            {token && (
+              <Button variant="default" disabled={pending} onClick={() => void save('POST')}>
+                Save
+              </Button>
+            )}
+            {token !== storedToken && (
+              <Button
+                variant="outline"
+                disabled={pending}
+                onClick={() => {
+                  setToken(storedToken);
+                  setError('');
+                }}
+              >
+                Cancel
+              </Button>
+            )}
+            {stored && (
+              <Button variant="destructive" disabled={pending} onClick={() => void save('DELETE')}>
+                Delete
+              </Button>
+            )}
+          </div>
+        </>
       )}
-      {profile && (
+      {admin && stored && (
+        <Button variant="default" disabled={pending} onClick={() => void validate()}>
+          Validate
+        </Button>
+      )}
+      {(!admin || stored) && (
+        <Button variant="default" disabled={pending} onClick={() => void sync()}>
+          Sync subscriptions
+        </Button>
+      )}
+      {admin && profile && (
         <p className="text-sm">
           Username: {profile.user.username}. Tier: {profile.sponsor_tier.name} —{' '}
           {profile.sponsor_tier.description}. Subscriptions: {profile.subscription_count}/

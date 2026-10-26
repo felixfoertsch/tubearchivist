@@ -1,6 +1,9 @@
 """Operator capabilities never grant database/credential administration."""
 
+from copy import deepcopy
+
 import pytest
+from appsettings.src.config import AppConfig
 from rest_framework.test import APIClient
 from task.src.task_manager import TaskManager
 from user.models import Account
@@ -67,6 +70,52 @@ def test_account_capabilities_not_staff(operator):
     assert response.data["can_administer"] is False
     assert response.data["is_staff"] is False
     assert operator.get("/admin/").status_code == 302
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.parametrize("stored", [True, False])
+def test_operator_cannot_toggle_stored_cookie(operator, enabled, stored):
+    config = AppConfig()
+    config.update_config({"downloads": {"cookie_import": stored}})
+    before = deepcopy(AppConfig().config)
+    response = operator.post(
+        "/api/appsettings/config/",
+        {
+            "downloads": {"cookie_import": enabled, "sleep_interval": 42},
+            "subscriptions": {"channel_size": 17},
+        },
+        format="json",
+    )
+    assert response.status_code == 403
+    assert AppConfig().config == before
+
+
+def test_operator_can_update_normal_config(operator):
+    AppConfig()
+    response = operator.post(
+        "/api/appsettings/config/",
+        {"downloads": {"sleep_interval": 42}},
+        format="json",
+    )
+    assert response.status_code == 200
+    assert AppConfig().config["downloads"]["sleep_interval"] == 42
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_admin_can_toggle_stored_cookie(settings, enabled):
+    user = Account.objects.create_user("administrator", "password")
+    user.is_staff = True
+    user.save()
+    client = APIClient()
+    client.force_login(user)
+    AppConfig().update_config({"downloads": {"cookie_import": not enabled}})
+    response = client.post(
+        "/api/appsettings/config/",
+        {"downloads": {"cookie_import": enabled}},
+        format="json",
+    )
+    assert response.status_code == 200
+    assert AppConfig().config["downloads"]["cookie_import"] is enabled
 
 
 def test_anonymous_never_gains_operator_access(settings):
