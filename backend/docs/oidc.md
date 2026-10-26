@@ -26,7 +26,10 @@ Issuer metadata must match configured issuer exactly. Signing algorithm is RS256
 Provider requests use a 10-second timeout and reject redirects. Do not expose
 client secrets through app settings or public auth-options responses.
 OIDC mode marks session and CSRF cookies Secure; serve app through HTTPS.
-Configure proxy access logs to omit callback query strings (authorization codes).
+Backend Uvicorn access logs stay disabled, including with `DJANGO_DEBUG`, to keep
+authorization codes and state out of callback query logs. Other startup logging
+levels remain unchanged. Configure proxy access logs to omit callback query strings
+(authorization codes); verify live proxy logging before deployment.
 Do not enable Authlib/requests debug logging, which can contain protocol secrets.
 
 Register one confidential authorization-code client, strict callback above, scopes

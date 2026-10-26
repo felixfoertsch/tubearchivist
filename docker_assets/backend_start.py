@@ -14,5 +14,7 @@ if __name__ == "__main__":
         port=PORT,
         workers=4,
         log_level=LOG_LEVEL,
+        # Authorization callback queries contain codes/state, even in debug.
+        access_log=False,
         reload=False,
     )
