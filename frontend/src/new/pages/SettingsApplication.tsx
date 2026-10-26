@@ -1,12 +1,13 @@
 import { useConfirm } from '../components/useConfirm';
 import { useEffect, useState } from 'react';
+import useCanManageApp from '../../functions/useCanManageApp';
 import useIsAdmin from '../../functions/useIsAdmin';
 import type { AppSettingsConfigType } from '../../api/loader/loadAppsettingsConfig';
-import type { CookieStateType } from '../../api/loader/loadCookie';
 import { SettingsApplicationSection } from '../components/SettingsApplicationSections';
 import {
   isoDateTime,
   loadApplicationSettings,
+  validateAppSettings,
   saveApplicationSetting,
 } from '../lib/settingsApplication';
 import { requestJson, settingsError } from '../lib/settings';
@@ -18,8 +19,8 @@ import { Checkbox } from '../ui/checkbox';
 
 type State = {
   settings: AppSettingsConfigType;
-  token: string;
-  cookie: CookieStateType;
+  token?: string;
+  cookie?: { cookie_enabled: boolean; validated?: number | string; validated_str?: string };
 };
 const fields = [
   [
@@ -130,6 +131,7 @@ const fields = [
 ] as const;
 function AdminSettings() {
   const { confirm, dialog } = useConfirm();
+  const canAdminister = useIsAdmin();
   const [data, setData] = useState<State>();
   const [error, setError] = useState('');
   const [pending, setPending] = useState('');
@@ -139,7 +141,9 @@ function AdminSettings() {
   const [tokenVisible, setTokenVisible] = useState(false);
   async function refresh() {
     try {
-      const result = await loadApplicationSettings();
+      const result = canAdminister
+        ? await loadApplicationSettings()
+        : { settings: validateAppSettings(await requestJson<unknown>('/api/appsettings/config/')) };
       setData(result);
       setError('');
     } catch (caught) {
@@ -148,7 +152,12 @@ function AdminSettings() {
   }
   useEffect(() => {
     let active = true;
-    loadApplicationSettings()
+    (canAdminister
+      ? loadApplicationSettings()
+      : requestJson<unknown>('/api/appsettings/config/').then(settings => ({
+          settings: validateAppSettings(settings),
+        }))
+    )
       .then(result => {
         if (active) {
           setData(result);
@@ -249,7 +258,10 @@ function AdminSettings() {
           </SettingsApplicationSection>
           <SettingsApplicationSection title="Downloads">
             {fields
-              .filter(([group]) => group === 'downloads')
+              .filter(
+                ([group, key]) =>
+                  group === 'downloads' && (canAdminister || key !== 'pot_provider_url'),
+              )
               .map(([group, key, label, type, min, help]) => (
                 <SettingField
                   key={`${group}.${key}`}
@@ -347,151 +359,155 @@ function AdminSettings() {
               </NativeSelect>
             </label>
           </SettingsApplicationSection>
-          <SettingsApplicationSection title="Cookie and integrations">
-            <p className="text-sm">
-              Cookie:{' '}
-              {data.cookie.cookie_enabled
-                ? `Enabled; last validation ${data.cookie.validated ? isoDateTime(data.cookie.validated) : 'Unknown'}`
-                : 'Disabled'}
-            </p>
-            {cookieEntry ? (
-              <label className="grid gap-1 text-sm">
-                Netscape cookie file
-                {cookieReveal ? (
-                  <Textarea
-                    aria-label="Netscape cookie file"
-                    className="min-h-36 font-mono text-xs"
-                    autoComplete="off"
-                    value={cookieDraft}
-                    onChange={event => setCookieDraft(event.target.value)}
-                  />
+          <SettingsApplicationSection title="Application and credentials">
+            {canAdminister && (
+              <>
+                <p className="text-sm">
+                  Cookie:{' '}
+                  {data.cookie?.cookie_enabled
+                    ? `Enabled; last validation ${data.cookie?.validated ? isoDateTime(data.cookie?.validated) : 'Unknown'}`
+                    : 'Disabled'}
+                </p>
+                {cookieEntry ? (
+                  <label className="grid gap-1 text-sm">
+                    Netscape cookie file
+                    {cookieReveal ? (
+                      <Textarea
+                        aria-label="Netscape cookie file"
+                        className="min-h-36 font-mono text-xs"
+                        autoComplete="off"
+                        value={cookieDraft}
+                        onChange={event => setCookieDraft(event.target.value)}
+                      />
+                    ) : (
+                      <Input
+                        aria-label="Masked Netscape cookie entry"
+                        type="password"
+                        readOnly
+                        value={cookieDraft}
+                        placeholder="Reveal entry to paste multiline Netscape cookies"
+                      />
+                    )}
+                  </label>
                 ) : (
-                  <Input
-                    aria-label="Masked Netscape cookie entry"
-                    type="password"
-                    readOnly
-                    value={cookieDraft}
-                    placeholder="Reveal entry to paste multiline Netscape cookies"
-                  />
+                  <p className="text-sm text-muted-foreground">
+                    Cookie contents never display after entry.
+                  </p>
                 )}
-              </label>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Cookie contents never display after entry.
-              </p>
-            )}
-            <div className="flex flex-wrap gap-2">
-              {!cookieEntry && (
-                <Button
-                  variant="outline"
-                  aria-expanded={cookieEntry}
-                  onClick={() => setCookieEntry(true)}
-                >
-                  Enter cookie
-                </Button>
-              )}
-              {cookieEntry && (
-                <>
-                  <Button variant="outline" onClick={() => setCookieReveal(!cookieReveal)}>
-                    {cookieReveal ? 'Mask cookie entry' : 'Reveal cookie entry'}
-                  </Button>
-                  <Button
-                    variant="default"
-                    disabled={!!pending || !cookieDraft}
-                    onClick={() =>
-                      void mutate('Cookie update', async () => {
-                        await requestJson('/api/appsettings/cookie/', {
-                          method: 'PUT',
-                          body: JSON.stringify({ cookie: cookieDraft }),
-                        });
-                        setCookieDraft('');
-                        setCookieEntry(false);
-                        setCookieReveal(false);
-                      })
-                    }
-                  >
-                    Save cookie
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setCookieDraft('');
-                      setCookieEntry(false);
-                      setCookieReveal(false);
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </>
-              )}
-              {data.cookie.cookie_enabled && (
-                <>
-                  <Button
-                    variant="default"
-                    disabled={!!pending}
-                    onClick={() =>
-                      void mutate('Cookie validation', () =>
-                        requestJson('/api/appsettings/cookie/', { method: 'POST' }).then(
-                          () => undefined,
-                        ),
-                      )
-                    }
-                  >
-                    Validate
+                <div className="flex flex-wrap gap-2">
+                  {!cookieEntry && (
+                    <Button
+                      variant="outline"
+                      aria-expanded={cookieEntry}
+                      onClick={() => setCookieEntry(true)}
+                    >
+                      Enter cookie
+                    </Button>
+                  )}
+                  {cookieEntry && (
+                    <>
+                      <Button variant="outline" onClick={() => setCookieReveal(!cookieReveal)}>
+                        {cookieReveal ? 'Mask cookie entry' : 'Reveal cookie entry'}
+                      </Button>
+                      <Button
+                        variant="default"
+                        disabled={!!pending || !cookieDraft}
+                        onClick={() =>
+                          void mutate('Cookie update', async () => {
+                            await requestJson('/api/appsettings/cookie/', {
+                              method: 'PUT',
+                              body: JSON.stringify({ cookie: cookieDraft }),
+                            });
+                            setCookieDraft('');
+                            setCookieEntry(false);
+                            setCookieReveal(false);
+                          })
+                        }
+                      >
+                        Save cookie
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setCookieDraft('');
+                          setCookieEntry(false);
+                          setCookieReveal(false);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </>
+                  )}
+                  {data.cookie?.cookie_enabled && (
+                    <>
+                      <Button
+                        variant="default"
+                        disabled={!!pending}
+                        onClick={() =>
+                          void mutate('Cookie validation', () =>
+                            requestJson('/api/appsettings/cookie/', { method: 'POST' }).then(
+                              () => undefined,
+                            ),
+                          )
+                        }
+                      >
+                        Validate
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        disabled={!!pending}
+                        onClick={() =>
+                          void mutate(
+                            'cookie revoke',
+                            () =>
+                              requestJson('/api/appsettings/cookie/', { method: 'DELETE' }).then(
+                                () => undefined,
+                              ),
+                            true,
+                          )
+                        }
+                      >
+                        Revoke cookie
+                      </Button>
+                    </>
+                  )}
+                </div>
+                {cookieEntry && (
+                  <p className="text-xs text-muted-foreground">
+                    Cookie text is obscured while editing. Revealing changes display only. Netscape
+                    rows require line breaks.
+                  </p>
+                )}
+                <p className="text-sm">API token</p>
+                <div className="flex gap-2">
+                  <Input
+                    type={tokenVisible ? 'text' : 'password'}
+                    readOnly
+                    value={data.token ?? ''}
+                    aria-label="API token"
+                  />
+                  <Button variant="outline" onClick={() => setTokenVisible(!tokenVisible)}>
+                    {tokenVisible ? 'Hide' : 'Reveal'}
                   </Button>
                   <Button
                     variant="destructive"
                     disabled={!!pending}
                     onClick={() =>
                       void mutate(
-                        'cookie revoke',
+                        'API token revoke',
                         () =>
-                          requestJson('/api/appsettings/cookie/', { method: 'DELETE' }).then(
+                          requestJson('/api/appsettings/token/', { method: 'DELETE' }).then(
                             () => undefined,
                           ),
                         true,
                       )
                     }
                   >
-                    Revoke cookie
+                    Revoke
                   </Button>
-                </>
-              )}
-            </div>
-            {cookieEntry && (
-              <p className="text-xs text-muted-foreground">
-                Cookie text is obscured while editing. Revealing changes display only. Netscape rows
-                require line breaks.
-              </p>
+                </div>
+              </>
             )}
-            <p className="text-sm">API token</p>
-            <div className="flex gap-2">
-              <Input
-                type={tokenVisible ? 'text' : 'password'}
-                readOnly
-                value={data.token}
-                aria-label="API token"
-              />
-              <Button variant="outline" onClick={() => setTokenVisible(!tokenVisible)}>
-                {tokenVisible ? 'Hide' : 'Reveal'}
-              </Button>
-              <Button
-                variant="destructive"
-                disabled={!!pending}
-                onClick={() =>
-                  void mutate(
-                    'API token revoke',
-                    () =>
-                      requestJson('/api/appsettings/token/', { method: 'DELETE' }).then(
-                        () => undefined,
-                      ),
-                    true,
-                  )
-                }
-              >
-                Revoke
-              </Button>
-            </div>
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
                 checked={data.settings.application.enable_cast}
@@ -512,8 +528,8 @@ function AdminSettings() {
   );
 }
 function SettingsApplication() {
-  const isAdmin = useIsAdmin();
-  return isAdmin ? <AdminSettings /> : <>Administrator access required.</>;
+  const canManageApp = useCanManageApp();
+  return canManageApp ? <AdminSettings /> : <>App operator access required.</>;
 }
 function SettingField({
   group,

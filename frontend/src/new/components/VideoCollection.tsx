@@ -4,7 +4,7 @@ import NewRoutes from '../routes';
 import { Link } from 'react-router-dom';
 import type { VideoType } from '../../pages/Home';
 import { useUserConfigStore } from '../../stores/UserConfigStore';
-import useIsAdmin from '../../functions/useIsAdmin';
+import useCanManageApp from '../../functions/useCanManageApp';
 import updateDownloadQueue from '../../api/actions/updateDownloadQueue';
 import queueReindex from '../../api/actions/queueReindex';
 import updateCustomPlaylist from '../../api/actions/updateCustomPlaylist';
@@ -38,7 +38,7 @@ export function VideoCollection({
 }) {
   const { confirm, dialog } = useConfirm();
   const { userConfig } = useUserConfigStore();
-  const isAdmin = useIsAdmin();
+  const isAdmin = useCanManageApp();
   const style = view ?? userConfig.view_style_home;
   const [selection, setSelection] = useState<string[]>([]);
   const [showSelection, setShowSelection] = useState(false);

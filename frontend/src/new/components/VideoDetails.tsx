@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { VideoResponseType } from '../../api/loader/loadVideoById';
 import type { ChannelType } from '../../pages/Channels';
-import useIsAdmin from '../../functions/useIsAdmin';
+import useCanManageApp from '../../functions/useCanManageApp';
 import updateChannelSubscription from '../../api/actions/updateChannelSubscription';
 import { useUserConfigStore } from '../../stores/UserConfigStore';
 import { FileSizeUnits } from '../../api/actions/updateUserConfig';
@@ -28,7 +28,7 @@ export default function VideoDetails({
   onSeek: (seconds: number) => void;
   onRefresh: () => void;
 }) {
-  const isAdmin = useIsAdmin();
+  const isAdmin = useCanManageApp();
   const { userConfig } = useUserConfigStore();
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);

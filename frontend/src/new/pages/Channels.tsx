@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import loadChannelList from '../../api/loader/loadChannelList';
 import updateBulkChannelSubscriptions from '../../api/actions/updateBulkChannelSubscriptions';
 import updateUserConfig from '../../api/actions/updateUserConfig';
-import useIsAdmin from '../../functions/useIsAdmin';
+import useCanManageApp from '../../functions/useCanManageApp';
 import { useUserConfigStore } from '../../stores/UserConfigStore';
 import { Button } from '../ui/button';
 import { ChannelsList } from '../components/ChannelsList';
@@ -25,7 +25,7 @@ const assertResponse = (r: { status: number; error?: { error: string } }) => {
 
 export default function Channels() {
   const { userConfig, setUserConfig } = useUserConfigStore();
-  const admin = useIsAdmin();
+  const admin = useCanManageApp();
   const [params, setParams] = useSearchParams();
   const parsed = requestedPage(params.get('page'), userConfig.page_size);
   const page = parsed ?? 1;

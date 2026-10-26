@@ -4,7 +4,14 @@ from common.serializers import (
     AsyncTaskResponseSerializer,
     ErrorResponseSerializer,
 )
-from common.views_base import AdminOnly, ApiBaseView
+from common.views_base import (
+    AdminOnly,
+    ApiBaseView,
+    AppOperatorOnly,
+    AppOperatorTaskIDPermission,
+    AppOperatorTaskPermission,
+    check_admin,
+)
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework.response import Response
@@ -29,13 +36,20 @@ class TaskListView(ApiBaseView):
     GET: return a list of all stored task results
     """
 
-    permission_classes = [AdminOnly]
+    permission_classes = [AppOperatorOnly]
 
     @extend_schema(responses=TaskResultSerializer(many=True))
     def get(self, request):
         """get all stored task results"""
         # pylint: disable=unused-argument
         all_results = TaskManager().get_all_results()
+        if not check_admin(request.user):
+            all_results = [
+                result
+                for result in all_results
+                if result.get("name")
+                not in AppOperatorTaskPermission.BACKUP_TASKS
+            ]
         serializer = TaskResultSerializer(all_results, many=True)
 
         return Response(serializer.data)
@@ -47,7 +61,7 @@ class TaskNameListView(ApiBaseView):
     POST: start new background process
     """
 
-    permission_classes = [AdminOnly]
+    permission_classes = [AppOperatorTaskPermission]
 
     @extend_schema(
         responses={
@@ -107,7 +121,7 @@ class TaskIDView(ApiBaseView):
     """
 
     valid_commands = ["stop", "kill"]
-    permission_classes = [AdminOnly]
+    permission_classes = [AppOperatorTaskIDPermission]
 
     @extend_schema(
         responses={
@@ -187,7 +201,8 @@ class ScheduleListView(ApiBaseView):
     GET: list all schedules
     """
 
-    permission_classes = [AdminOnly]
+    app_operator_schedule = True
+    permission_classes = [AppOperatorTaskPermission]
 
     @extend_schema(
         responses={
@@ -197,6 +212,8 @@ class ScheduleListView(ApiBaseView):
     def get(self, request):
         """get all schedules"""
         tasks = CustomPeriodicTask.objects.all()
+        if not check_admin(request.user):
+            tasks = tasks.exclude(name__in={"run_backup", "restore_backup"})
         serializer = CustomPeriodicTaskSerializer(tasks, many=True)
         return Response(serializer.data)
 
@@ -208,7 +225,8 @@ class ScheduleView(ApiBaseView):
     DEL: delete schedule for task
     """
 
-    permission_classes = [AdminOnly]
+    app_operator_schedule = True
+    permission_classes = [AppOperatorTaskPermission]
 
     @extend_schema(
         responses={
@@ -298,6 +316,8 @@ class ScheduleNotification(ApiBaseView):
     DEL: delete notification
     """
 
+    permission_classes = [AdminOnly]
+
     @extend_schema(
         responses=TaskNotificationSerializer(),
     )
@@ -365,6 +385,8 @@ class NotificationTestView(ApiBaseView):
     """resolves to /api/task/notification/test/
     POST: test notification url
     """
+
+    permission_classes = [AdminOnly]
 
     @extend_schema(
         request=TaskNotificationTestSerializer(),

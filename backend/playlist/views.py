@@ -7,7 +7,7 @@ from common.serializers import (
     ErrorResponseSerializer,
 )
 from common.src.domain import playlist_data
-from common.views_base import AdminWriteOnly, ApiBaseView
+from common.views_base import ApiBaseView, AppOperatorWriteOnly
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from playlist.models import Playlist
 from playlist.serializers import (
@@ -39,7 +39,7 @@ class PlaylistApiListView(ApiBaseView):
     POST: change subscribe state
     """
 
-    permission_classes = [AdminWriteOnly]
+    permission_classes = [AppOperatorWriteOnly]
 
     @extend_schema(
         responses={
@@ -112,7 +112,7 @@ class PlaylistCustomApiListView(ApiBaseView):
     POST: Create new custom playlist
     """
 
-    permission_classes = [AdminWriteOnly]
+    permission_classes = [AppOperatorWriteOnly]
 
     @extend_schema(
         request=PlaylistListCustomPostSerializer(),
@@ -146,7 +146,7 @@ class PlaylistCustomApiView(ApiBaseView):
     POST: modify custom playlist
     """
 
-    permission_classes = [AdminWriteOnly]
+    permission_classes = [AppOperatorWriteOnly]
 
     @extend_schema(
         request=PlaylistCustomPostSerializer(),
@@ -205,7 +205,7 @@ class PlaylistApiView(ApiBaseView):
     GET: returns metadata dict of playlist
     """
 
-    permission_classes = [AdminWriteOnly]
+    permission_classes = [AppOperatorWriteOnly]
     valid_custom_actions = ["create", "remove", "up", "down", "top", "bottom"]
 
     @extend_schema(

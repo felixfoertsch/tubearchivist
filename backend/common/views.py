@@ -17,7 +17,7 @@ from common.serializers import (
 from common.src.runtime import RuntimeStore
 from common.src.searching import SearchForm
 from common.src.watched import WatchState
-from common.views_base import AdminOnly, ApiBaseView
+from common.views_base import ApiBaseView, AppOperatorOnly, check_admin
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -51,7 +51,7 @@ class RefreshView(ApiBaseView):
     POST: start a manual refresh task
     """
 
-    permission_classes = [AdminOnly]
+    permission_classes = [AppOperatorOnly]
 
     @extend_schema(
         responses={
@@ -202,6 +202,13 @@ class NotificationView(ApiBaseView):
             for item in RuntimeStore().list_items("message:")
             if filter_by is None or item.get("group", "").startswith(filter_by)
         ]
+        if not check_admin(request.user):
+            notifications = [
+                item
+                for item in notifications
+                if item.get("group")
+                not in {"setting:backup", "setting:restore"}
+            ]
         response_serializer = NotificationSerializer(notifications, many=True)
 
         return Response(response_serializer.data)

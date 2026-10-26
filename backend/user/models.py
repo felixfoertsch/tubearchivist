@@ -54,6 +54,27 @@ class Account(AbstractBaseUser, PermissionsMixin):
     REQUIRED_FIELDS = ["password"]
 
 
+class FederatedIdentity(models.Model):
+    account = models.OneToOneField(Account, on_delete=models.CASCADE)
+    issuer = models.CharField(max_length=512)
+    subject = models.CharField(max_length=255)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["issuer", "subject"], name="federated_identity_key"
+            )
+        ]
+
+
+class OIDCTransaction(models.Model):
+    """Server-side one-use fence, including concurrent callback requests."""
+
+    state_hash = models.CharField(max_length=64, primary_key=True)
+    session_key = models.CharField(max_length=40)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class UserSettings(models.Model):
     account = models.OneToOneField(
         Account,

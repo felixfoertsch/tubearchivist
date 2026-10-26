@@ -5,7 +5,7 @@ from common.src.domain import video_data
 from common.src.helper import calc_is_watched
 from common.src.runtime import RuntimeStore
 from common.src.watched import WatchState
-from common.views_base import AdminWriteOnly, ApiBaseView
+from common.views_base import ApiBaseView, AppOperatorWriteOnly
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from playlist.src.index import YoutubePlaylist
 from rest_framework.response import Response
@@ -72,7 +72,7 @@ class VideoApiView(ApiBaseView):
     model = Video
     to_data = staticmethod(video_data)
     is_video = True
-    permission_classes = [AdminWriteOnly]
+    permission_classes = [AppOperatorWriteOnly]
 
     @extend_schema(
         responses={

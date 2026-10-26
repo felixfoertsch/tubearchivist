@@ -5,7 +5,7 @@ from common.serializers import (
     ErrorResponseSerializer,
 )
 from common.src.domain import download_data
-from common.views_base import AdminOnly, ApiBaseView
+from common.views_base import ApiBaseView, AppOperatorOnly
 from download.models import Download
 from download.serializers import (
     AddToDownloadListSerializer,
@@ -55,7 +55,7 @@ class DownloadApiListView(ApiBaseView):
             )
         return queryset.order_by("timestamp", "pk")
 
-    permission_classes = [AdminOnly]
+    permission_classes = [AppOperatorOnly]
 
     @extend_schema(
         responses={
@@ -206,7 +206,7 @@ class DownloadApiView(ApiBaseView):
     """
 
     valid_status = ["pending", "ignore", "ignore-force", "priority"]
-    permission_classes = [AdminOnly]
+    permission_classes = [AppOperatorOnly]
 
     @extend_schema(
         responses={

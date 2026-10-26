@@ -17,8 +17,15 @@ DRF_LOGGER = logging.getLogger("django.security.csrf")
 
 
 def check_admin(user):
-    """check for admin permission for restricted views"""
+    """check for administrator-only permission"""
     return user.is_staff or user.groups.filter(name="admin").exists()
+
+
+def can_manage_app(user):
+    """App operators can manage content; admin checks stay security-only."""
+    return bool(user.is_authenticated) and (
+        getattr(settings, "TA_APP_OPERATOR_ACCESS", False) or check_admin(user)
+    )
 
 
 class AdminOnly(permissions.BasePermission):
@@ -35,6 +42,57 @@ class AdminWriteOnly(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return permissions.IsAuthenticated().has_permission(request, view)
         return check_admin(request.user)
+
+
+class AppOperatorOnly(permissions.BasePermission):
+    """allow app operators, but never replace administrator gates"""
+
+    def has_permission(self, request, view):
+        return can_manage_app(request.user)
+
+
+class AppOperatorWriteOnly(permissions.BasePermission):
+    """allow authenticated reads and app-operator writes"""
+
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return permissions.IsAuthenticated().has_permission(request, view)
+        return can_manage_app(request.user)
+
+
+class AppOperatorTaskPermission(permissions.BasePermission):
+    """Allow operators task starts and schedules except backup tasks."""
+
+    BACKUP_TASKS = {"run_backup", "restore_backup"}
+
+    def has_permission(self, request, view):
+        if check_admin(request.user):
+            return True
+        if not can_manage_app(request.user):
+            return False
+        task_name = view.kwargs.get("task_name")
+        if task_name in self.BACKUP_TASKS:
+            return False
+        if getattr(view, "app_operator_schedule", False):
+            return True
+        return request.method in {"GET", "POST"}
+
+
+class AppOperatorTaskIDPermission(permissions.BasePermission):
+    """Task IDs must resolve to a non-security task before operator access."""
+
+    def has_permission(self, request, view):
+        if check_admin(request.user):
+            return True
+        if not can_manage_app(request.user):
+            return False
+        from task.src.task_manager import TaskManager
+
+        task = TaskManager().get_task(view.kwargs["task_id"])
+        return (
+            bool(task)
+            and task.get("name") not in AppOperatorTaskPermission.BACKUP_TASKS
+        )
 
 
 class CsrfLoggingSessionAuthentication(SessionAuthentication):

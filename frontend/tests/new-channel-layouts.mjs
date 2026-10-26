@@ -187,9 +187,9 @@ test('channel directory renders distinct compact saved views', async t => {
     });
     await t.test('subscription controls stay permission-gated across views', () => {
       for (const view of ['grid', 'list', 'table']) {
-        setAccount({ is_staff: false, is_superuser: false });
+        setAccount({ is_staff: false, is_superuser: false, can_manage_app: false });
         assert.doesNotMatch(render(view), /<button/);
-        setAccount({ is_staff: true });
+        setAccount({ is_staff: true, can_manage_app: true });
         const html = render(view);
         assert.equal((html.match(/<button/g) ?? []).length, 12);
         assert.match(html, />Unsubscribe<\/button>/);

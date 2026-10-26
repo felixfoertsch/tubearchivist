@@ -20,21 +20,31 @@ test('unified settings renders one frame and visible role-gated sections', async
   try {
     const { default: Settings } = await server.ssrLoadModule('/src/new/pages/Settings.tsx');
     const { useUserAccountStore } = await server.ssrLoadModule('/src/stores/UserAccountStore.ts');
-    for (const is_staff of [false, true]) {
-      Object.assign(useUserAccountStore.getInitialState(), { userAccount: { is_staff } });
+    for (const account of [
+      { can_manage_app: false, can_administer: false },
+      { can_manage_app: true, can_administer: false },
+      { can_manage_app: true, can_administer: true },
+    ]) {
+      Object.assign(useUserAccountStore.getInitialState(), { userAccount: account });
       const html = renderToStaticMarkup(createElement(MemoryRouter, {}, createElement(Settings)));
       assert.equal((html.match(/<h1\b/g) || []).length, 1);
       assert.equal((html.match(/<title>/g) || []).length, 1);
       assert.doesNotMatch(html, /aria-label="Settings"|role="tab/);
       for (const section of ['user', 'application', 'scheduling', 'actions']) {
-        assert.equal(html.includes(`id="${section}"`), section === 'user' || is_staff);
+        assert.equal(
+          html.includes(`id="${section}"`),
+          section === 'user' ||
+            (section === 'application' && account.can_manage_app) ||
+            (['scheduling', 'actions'].includes(section) && account.can_manage_app),
+        );
       }
       assert.match(html, /User/);
       const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
       assert.equal(new Set(ids).size, ids.length);
       assert.doesNotMatch(html, /<form[^>]*>(?:(?!<\/form>)[\s\S])*<form/);
-      if (!is_staff)
+      if (!account.can_manage_app)
         assert.doesNotMatch(html, /Loading application|Loading schedule|Database backups/);
+      if (!account.can_administer) assert.doesNotMatch(html, /Database backups|Task notifications/);
     }
   } finally {
     await server.close();
@@ -65,6 +75,7 @@ test('ordinary user never mounts admin children; hash effects follow history cha
       if (path === 'react') return { useEffect: callback => effects.push(callback) };
       if (path === 'react-router-dom') return { useLocation: () => ({ hash }) };
       if (path.endsWith('/useIsAdmin')) return () => false;
+      if (path.endsWith('/useCanManageApp')) return () => false;
       if (path.endsWith('/SettingsFrame')) return ({ children }) => children;
       return () => {
         mounted.push(path);
@@ -120,6 +131,7 @@ test('actual router redirects legacy sections, removes product About, keeps chan
         };
       if (path === 'react') return { useState: initial => [initial, () => {}], useEffect() {} };
       if (path === '../functions/useIsAdmin') return () => true;
+      if (path === '../functions/useCanManageApp') return () => true;
       if (path === '../stores/AuthDataStore')
         return {
           useAuthStore: selector =>

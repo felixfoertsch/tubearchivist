@@ -9,7 +9,7 @@ import updateBulkPlaylistSubscriptions from '../../api/actions/updateBulkPlaylis
 import createCustomPlaylist from '../../api/actions/createCustomPlaylist';
 import updateUserConfig from '../../api/actions/updateUserConfig';
 import { useUserConfigStore } from '../../stores/UserConfigStore';
-import useIsAdmin from '../../functions/useIsAdmin';
+import useCanManageApp from '../../functions/useCanManageApp';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
@@ -19,7 +19,7 @@ import { useTaskStore } from '../lib/tasks';
 
 export default function Playlists() {
   const { userConfig, setUserConfig } = useUserConfigStore();
-  const isAdmin = useIsAdmin();
+  const isAdmin = useCanManageApp();
   const [searchParams, setSearchParams] = useSearchParams();
   const parsedPage = requestedPage(searchParams.get('page'), userConfig.page_size);
   const page = parsedPage ?? 0;

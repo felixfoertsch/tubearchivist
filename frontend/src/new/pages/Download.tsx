@@ -13,7 +13,7 @@ import loadChannelById from '../../api/loader/loadChannelById';
 import updateChannelOverwrites from '../../api/actions/updateChannelOverwrite';
 import deleteDownloadQueueByFilter from '../../api/actions/deleteDownloadQueueByFilter';
 import { useUserConfigStore } from '../../stores/UserConfigStore';
-import useIsAdmin from '../../functions/useIsAdmin';
+import useCanManageApp from '../../functions/useCanManageApp';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
@@ -38,7 +38,7 @@ import type { DownloadResponseType } from '../lib/download';
 
 export function Download() {
   const { confirm, dialog } = useConfirm();
-  const admin = useIsAdmin();
+  const admin = useCanManageApp();
   const { userConfig, setUserConfig } = useUserConfigStore();
   const [params, setParams] = useSearchParams();
   const [refresh, setRefresh] = useState(0);

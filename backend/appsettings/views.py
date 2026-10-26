@@ -16,7 +16,13 @@ from common.serializers import (
     ErrorResponseSerializer,
 )
 from common.src.runtime import RuntimeStore
-from common.views_base import AdminOnly, AdminWriteOnly, ApiBaseView
+from common.views_base import (
+    AdminOnly,
+    ApiBaseView,
+    AppOperatorOnly,
+    AppOperatorWriteOnly,
+    check_admin,
+)
 from django.http import FileResponse
 from download.src.yt_dlp_base import CookieHandler
 from drf_spectacular.utils import OpenApiResponse, extend_schema
@@ -163,7 +169,19 @@ class AppConfigApiView(ApiBaseView):
     POST: update app settings
     """
 
-    permission_classes = [AdminWriteOnly]
+    permission_classes = [AppOperatorWriteOnly]
+
+    @staticmethod
+    def _serialize_config(config, user):
+        if not check_admin(user):
+            config = {
+                **config,
+                "downloads": {
+                    **config["downloads"],
+                    "pot_provider_url": None,
+                },
+            }
+        return AppConfigSerializer(config).data
 
     @staticmethod
     @extend_schema(
@@ -173,9 +191,10 @@ class AppConfigApiView(ApiBaseView):
     )
     def get(request):
         """get app config"""
-        response = AppConfig().config
-        serializer = AppConfigSerializer(response)
-        return Response(serializer.data)
+        response = AppConfigApiView._serialize_config(
+            AppConfig().config, request.user
+        )
+        return Response(response)
 
     @staticmethod
     @extend_schema(
@@ -192,9 +211,16 @@ class AppConfigApiView(ApiBaseView):
         serializer = AppConfigSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         validated_data = serializer.validated_data
+        if not check_admin(
+            request.user
+        ) and "pot_provider_url" in validated_data.get("downloads", {}):
+            return Response(
+                {"error": "Administrator access required."}, status=403
+            )
         updated_config = AppConfig().update_config(validated_data)
-        updated_serializer = AppConfigSerializer(updated_config)
-        return Response(updated_serializer.data)
+        return Response(
+            AppConfigApiView._serialize_config(updated_config, request.user)
+        )
 
 
 class CookieView(ApiBaseView):
@@ -323,7 +349,7 @@ class RescanFileSystem(ApiBaseView):
     POST: start new rescan filesystem task
     """
 
-    permission_classes = [AdminOnly]
+    permission_classes = [AppOperatorOnly]
 
     @staticmethod
     @extend_schema(
@@ -349,7 +375,7 @@ class ManualImportView(ApiBaseView):
     POST: start new manual import task
     """
 
-    permission_classes = [AdminOnly]
+    permission_classes = [AppOperatorOnly]
 
     @staticmethod
     @extend_schema(

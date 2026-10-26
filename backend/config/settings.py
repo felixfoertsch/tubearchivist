@@ -15,7 +15,7 @@ from os import environ
 from pathlib import Path
 from time import time
 
-from common.src.env_settings import EnvironmentSettings
+from common.src.env_settings import EnvironmentSettings, get_password_from_file
 from common.src.helper import ta_host_parser
 from corsheaders.defaults import default_headers
 
@@ -175,6 +175,23 @@ else:
             "django.contrib.auth.backends.RemoteUserBackend",
         )
         MIDDLEWARE.append("user.src.remote_user_auth.HttpRemoteUserMiddleware")
+
+# OIDC is opt-in and independent from existing password authentication modes.
+_operator_access = environ.get("TA_APP_OPERATOR_ACCESS", "false")
+if _operator_access not in ("true", "false"):
+    raise ValueError("TA_APP_OPERATOR_ACCESS must be true or false")
+TA_APP_OPERATOR_ACCESS = _operator_access == "true"
+TA_OIDC_ISSUER = environ.get("TA_OIDC_ISSUER", "")
+TA_OIDC_CLIENT_ID = environ.get("TA_OIDC_CLIENT_ID", "")
+TA_OIDC_REDIRECT_URI = environ.get("TA_OIDC_REDIRECT_URI", "")
+if TA_OIDC_ISSUER:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+TA_OIDC_CLIENT_SECRET = (
+    get_password_from_file("TA_OIDC_CLIENT_SECRET")
+    if TA_OIDC_ISSUER or TA_OIDC_CLIENT_ID or TA_OIDC_REDIRECT_URI
+    else ""
+)
 
 # Internationalization
 # https://docs.djangoproject.com/en/3.2/topics/i18n/

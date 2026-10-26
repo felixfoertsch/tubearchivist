@@ -19,7 +19,7 @@ import updatePlaylistSortOrder from '../../api/actions/updatePlaylistSortOrder';
 import { useUserConfigStore } from '../../stores/UserConfigStore';
 import { useFilterBarTempConf } from '../../stores/FilterbarTempConf';
 import { requestedPage, nextPage } from '../pagination';
-import useIsAdmin from '../../functions/useIsAdmin';
+import useCanManageApp from '../../functions/useCanManageApp';
 import { Button } from '../ui/button';
 import VideoFilters from '../components/VideoFilters';
 import { NativeSelect } from '../ui/native-select';
@@ -32,7 +32,7 @@ export default function Playlist() {
   const navigate = useNavigate();
   const { userConfig } = useUserConfigStore();
   const { filterHeight } = useFilterBarTempConf();
-  const isAdmin = useIsAdmin();
+  const isAdmin = useCanManageApp();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const page = requestedPage(searchParams.get('page'), userConfig.page_size) ?? 0;

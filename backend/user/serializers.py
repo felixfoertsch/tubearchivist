@@ -3,6 +3,7 @@
 # pylint: disable=abstract-method
 
 from common.src.helper import get_stylesheets
+from common.views_base import can_manage_app, check_admin
 from rest_framework import serializers
 from user.models import Account
 from video.src.constants import OrderEnum, SortEnum, VideoTypeEnum
@@ -10,6 +11,15 @@ from video.src.constants import OrderEnum, SortEnum, VideoTypeEnum
 
 class AccountSerializer(serializers.ModelSerializer):
     """serialize account"""
+
+    can_manage_app = serializers.SerializerMethodField()
+    can_administer = serializers.SerializerMethodField()
+
+    def get_can_manage_app(self, obj):
+        return can_manage_app(obj)
+
+    def get_can_administer(self, obj):
+        return check_admin(obj)
 
     class Meta:
         model = Account
@@ -21,6 +31,8 @@ class AccountSerializer(serializers.ModelSerializer):
             "groups",
             "user_permissions",
             "last_login",
+            "can_manage_app",
+            "can_administer",
         )
 
 

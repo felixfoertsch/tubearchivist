@@ -4,7 +4,7 @@ import NewRoutes from '../routes';
 import { assertResponse, errorMessage, isoDate } from '../videoMetadata';
 import type { PlaylistType } from '../../api/loader/loadPlaylistById';
 import updatePlaylistSubscription from '../../api/actions/updatePlaylistSubscription';
-import useIsAdmin from '../../functions/useIsAdmin';
+import useCanManageApp from '../../functions/useCanManageApp';
 import { useUserConfigStore } from '../../stores/UserConfigStore';
 import { Button } from '../ui/button';
 import { Collection, CollectionImage, CollectionItem } from './Collection';
@@ -54,7 +54,7 @@ function PlaylistListItem({
   refresh: () => void;
   view: string;
 }) {
-  const isAdmin = useIsAdmin();
+  const isAdmin = useCanManageApp();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const subscribed = async (value: boolean) => {

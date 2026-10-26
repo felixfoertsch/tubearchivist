@@ -7,7 +7,7 @@ import type { VideoType } from '../../pages/Home';
 import updateWatchedState from '../../api/actions/updateWatchedState';
 import deleteVideoProgressById from '../../api/actions/deleteVideoProgressById';
 import updateCustomPlaylist from '../../api/actions/updateCustomPlaylist';
-import useIsAdmin from '../../functions/useIsAdmin';
+import useCanManageApp from '../../functions/useCanManageApp';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Progress } from '../ui/progress';
@@ -29,7 +29,7 @@ export default function VideoCard({
   selection?: React.ReactNode;
 }) {
   const { confirm, dialog } = useConfirm();
-  const isAdmin = useIsAdmin();
+  const isAdmin = useCanManageApp();
   const [, setSearchParams] = useSearchParams();
   const playInline: React.MouseEventHandler<HTMLAnchorElement> = event => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)

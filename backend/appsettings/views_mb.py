@@ -7,7 +7,7 @@ from appsettings.serializers_mb import MembershipProfileSerializer
 from appsettings.src.membership import Membership
 from common.serializers import ErrorResponseSerializer
 from common.src.runtime import RuntimeStore
-from common.views_base import AdminOnly, ApiBaseView
+from common.views_base import AdminOnly, ApiBaseView, AppOperatorOnly
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework.response import Response
 
@@ -61,7 +61,7 @@ class MembershipSubscriptionSync(ApiBaseView):
     POST: trigger sync task
     """
 
-    permission_classes = [AdminOnly]
+    permission_classes = [AppOperatorOnly]
 
     @staticmethod
     def post(request):

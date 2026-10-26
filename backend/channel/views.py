@@ -15,7 +15,7 @@ from channel.src.nav import ChannelNav
 from common.serializers import ErrorResponseSerializer
 from common.src.domain import channel_data
 from common.src.urlparser import Parser
-from common.views_base import AdminWriteOnly, ApiBaseView
+from common.views_base import ApiBaseView, AppOperatorWriteOnly
 from django.db.models import Count, Sum
 from drf_spectacular.utils import (
     OpenApiParameter,
@@ -36,7 +36,7 @@ class ChannelApiListView(ApiBaseView):
     model = Channel
     to_data = staticmethod(channel_data)
     valid_filter = ["subscribed"]
-    permission_classes = [AdminWriteOnly]
+    permission_classes = [AppOperatorWriteOnly]
 
     def get_queryset(self):
         queryset = Channel.objects.all()
@@ -102,7 +102,7 @@ class ChannelApiView(ApiBaseView):
 
     model = Channel
     to_data = staticmethod(channel_data)
-    permission_classes = [AdminWriteOnly]
+    permission_classes = [AppOperatorWriteOnly]
 
     @extend_schema(
         responses={

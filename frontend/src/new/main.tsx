@@ -18,7 +18,7 @@ import { useAuthStore } from '../stores/AuthDataStore';
 import { useUserConfigStore } from '../stores/UserConfigStore';
 import { useUserAccountStore } from '../stores/UserAccountStore';
 import { useAppSettingsStore } from '../stores/AppSettingsStore';
-import useIsAdmin from '../functions/useIsAdmin';
+import useCanManageApp from '../functions/useCanManageApp';
 import type { AuthenticationType } from '../pages/Base';
 import NewRoutes from './routes';
 import { loginHref } from './lib/navigation';
@@ -87,18 +87,18 @@ function ThemeRoot() {
 }
 
 function App() {
-  const isAdmin = useIsAdmin();
+  const canManageApp = useCanManageApp();
   const auth = useAuthStore(state => state.auth);
   const [error, setError] = useState('');
   const [loggingOut, setLoggingOut] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [theme, setTheme] = useState(readTheme);
-  useEffect(() => (isAdmin ? startTaskPolling() : undefined), [isAdmin]);
+  useEffect(() => (canManageApp ? startTaskPolling() : undefined), [canManageApp]);
   const links = [
     ['Home', NewRoutes.Home],
     ['Channels', NewRoutes.Channels],
     ['Playlists', NewRoutes.Playlists],
-    ...(isAdmin ? [['Downloads', NewRoutes.Downloads]] : []),
+    ...(canManageApp ? [['Downloads', NewRoutes.Downloads]] : []),
     ['Search', NewRoutes.Search],
     ['Dashboard', NewRoutes.Dashboard],
     ['Settings', NewRoutes.Settings],
@@ -161,7 +161,7 @@ function App() {
             </Sheet>
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-1">
-            {isAdmin && <TaskIndicator />}
+            {canManageApp && <TaskIndicator />}
             <Button
               variant="ghost"
               size="sm"

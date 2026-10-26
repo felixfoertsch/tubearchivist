@@ -1,5 +1,6 @@
 import { useConfirm } from '../components/useConfirm';
 import { useEffect, useState } from 'react';
+import useCanManageApp from '../../functions/useCanManageApp';
 import useIsAdmin from '../../functions/useIsAdmin';
 import type { ScheduleResponseType } from '../../api/loader/loadSchedule';
 import type { AppriseNotificationType } from '../../api/loader/loadAppriseNotification';
@@ -167,6 +168,8 @@ function ScheduleEditor({
 
 function Scheduler() {
   const { confirm, dialog } = useConfirm();
+  const admin = useIsAdmin();
+  const availableTasks = admin ? tasks : tasks.filter(([name]) => name !== 'run_backup');
   const [schedules, setSchedules] = useState<ScheduleResponseType>();
   const [notifications, setNotifications] = useState<AppriseNotificationType>();
   const [revision, setRevision] = useState(0);
@@ -178,10 +181,13 @@ function Scheduler() {
   const [message, setMessage] = useState('');
   useEffect(() => {
     const controller = new AbortController();
-    Promise.all([
-      requestJson<unknown>('/api/task/schedule/', { signal: controller.signal }),
-      requestJson<unknown>('/api/task/notification/', { signal: controller.signal }),
-    ])
+    const scheduleRequest = requestJson<unknown>('/api/task/schedule/', {
+      signal: controller.signal,
+    });
+    const notificationRequest = admin
+      ? requestJson<unknown>('/api/task/notification/', { signal: controller.signal })
+      : Promise.resolve({});
+    Promise.all([scheduleRequest, notificationRequest])
       .then(([schedule, notification]) => {
         if (
           !Array.isArray(schedule) ||
@@ -227,7 +233,7 @@ function Scheduler() {
         if (!controller.signal.aborted) setError(settingsError(error));
       });
     return () => controller.abort();
-  }, [revision]);
+  }, [admin, revision]);
   async function notificationAction(
     action: 'save' | 'test' | 'delete',
     taskName = task,
@@ -292,7 +298,7 @@ function Scheduler() {
         <p role="status">Loading scheduling settings…</p>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
-          {tasks.map(([name, title]) => (
+          {availableTasks.map(([name, title]) => (
             <ScheduleEditor
               key={name}
               name={name}
@@ -303,7 +309,7 @@ function Scheduler() {
           ))}
         </div>
       )}
-      {notifications && (
+      {admin && notifications && (
         <Card className="gap-3 p-4">
           <h3 className="font-semibold">Task notifications</h3>
           <p className="text-sm">
@@ -346,7 +352,7 @@ function Scheduler() {
                 value={task}
                 onChange={e => setTask(e.target.value)}
               >
-                {[...tasks.slice(0, 3), ['extract_download', 'Add to download queue']].map(
+                {[...availableTasks.slice(0, 3), ['extract_download', 'Add to download queue']].map(
                   ([name, title]) => (
                     <option key={name} value={name}>
                       {title}
@@ -387,6 +393,6 @@ function Scheduler() {
   );
 }
 export default function SettingsScheduling() {
-  const admin = useIsAdmin();
-  return admin ? <Scheduler /> : null;
+  const canManageApp = useCanManageApp();
+  return canManageApp ? <Scheduler /> : null;
 }

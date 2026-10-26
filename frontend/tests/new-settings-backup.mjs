@@ -129,6 +129,7 @@ test('database backup page supports download/delete, no restore; failed list sur
             },
           };
         if (name.endsWith('/useIsAdmin')) return { default: () => true };
+        if (name.endsWith('/useCanManageApp')) return { default: () => true };
         if (name.endsWith('/useConfirm'))
           return { useConfirm: () => ({ confirm: async () => true }) };
         if (name.endsWith('/settings')) return { requestJson, settingsError: e => e.message };

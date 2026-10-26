@@ -8,6 +8,8 @@ export type UserAccountType = {
   groups: [];
   user_permissions: [];
   last_login: string;
+  can_manage_app: boolean;
+  can_administer: boolean;
 };
 
 const loadUserAccount = async () => {

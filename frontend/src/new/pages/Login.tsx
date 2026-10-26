@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import signIn from '../../api/actions/signIn';
 import loadAuth from '../../api/loader/loadAuth';
+import loadAuthOptions, { type AuthOptionsType } from '../../api/loader/loadAuthOptions';
 import { safeReturnTo } from '../lib/navigation';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
@@ -17,10 +18,26 @@ export default function Login() {
   const [remember, setRemember] = useState(false);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(
+    params.has('oidc_error') ? 'Authentik sign-in failed. Try again or use local recovery.' : '',
+  );
   const [retry, setRetry] = useState(0);
+  const [authOptions, setAuthOptions] = useState<AuthOptionsType | null>(null);
   useEffect(() => {
     let active = true;
+    loadAuthOptions()
+      .then(response => {
+        if (!active) return;
+        if (response.data && !response.error && response.status === 200)
+          setAuthOptions(response.data);
+        else setError('Sign-in options unavailable. Local recovery remains available.');
+      })
+      .catch(() => {
+        if (active) {
+          setAuthOptions(null);
+          setError('Sign-in options unavailable. Local recovery remains available.');
+        }
+      });
     loadAuth()
       .then(response => {
         if (!active) return;
@@ -70,6 +87,15 @@ export default function Login() {
           <CardDescription>Your Self Hosted YouTube Media Server</CardDescription>
         </CardHeader>
         <CardContent>
+          {authOptions?.oidc_enabled && authOptions.oidc_login_url === '/api/user/oidc/login/' && (
+            <a
+              className="mb-4 inline-flex rounded-md border px-4 py-2 underline focus-visible:outline-none focus-visible:ring-2"
+              href={`${authOptions.oidc_login_url}?next=${encodeURIComponent(returnTo)}`}
+            >
+              Sign in with Authentik
+            </a>
+          )}
+          {authOptions?.oidc_enabled && <h2 className="mb-3 font-semibold">Local recovery</h2>}
           <form onSubmit={submit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="username">Username</Label>
@@ -120,8 +146,8 @@ export default function Login() {
                       Retry connection
                     </Button>
                     <p className="text-sm text-muted-foreground">
-                      Verify TA_HOST matches {window.location.origin} and Redis is reachable. See
-                      installation guide.
+                      Verify TA_HOST matches {window.location.origin} and PostgreSQL is reachable.
+                      See installation guide.
                     </p>
                   </>
                 )}

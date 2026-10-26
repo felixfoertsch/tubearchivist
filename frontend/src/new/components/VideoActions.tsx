@@ -10,7 +10,7 @@ import updateDownloadQueueStatusById from '../../api/actions/updateDownloadQueue
 import updateCustomPlaylist from '../../api/actions/updateCustomPlaylist';
 import getApiUrl from '../../configuration/getApiUrl';
 import { playerMediaUrl, playerPlaylistChange } from '../lib/player';
-import useIsAdmin from '../../functions/useIsAdmin';
+import useCanManageApp from '../../functions/useCanManageApp';
 import Routes from '../routes';
 import { Button } from '../ui/button';
 import {
@@ -38,7 +38,7 @@ export default function VideoActions({
   video: VideoResponseType;
   onRefresh: () => void;
 }) {
-  const isAdmin = useIsAdmin();
+  const isAdmin = useCanManageApp();
   const navigate = useNavigate();
   const [deleted, setDeleted] = useState(false);
   const [reindexed, setReindexed] = useState(false);

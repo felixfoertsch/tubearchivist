@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Collection, CollectionImage, CollectionItem } from './Collection';
 import { Link } from 'react-router-dom';
 import updateChannelSubscription from '../../api/actions/updateChannelSubscription';
-import useIsAdmin from '../../functions/useIsAdmin';
+import useCanManageApp from '../../functions/useCanManageApp';
 import type { ChannelType } from '../../pages/Channels';
 import { useUserConfigStore } from '../../stores/UserConfigStore';
 import NewRoutes from '../routes';
@@ -17,7 +17,7 @@ export function ChannelsList({
   channels: ChannelType[];
   refresh: () => void;
 }) {
-  const admin = Boolean(useIsAdmin());
+  const admin = Boolean(useCanManageApp());
   const { view_style_channel: view } = useUserConfigStore(state => state.userConfig);
   const rows = channels.map(channel => (
     <ChannelCard

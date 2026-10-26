@@ -15,7 +15,7 @@ import updateUserConfig from '../../api/actions/updateUserConfig';
 import deleteChannel from '../../api/actions/deleteChannel';
 import queueReindex, { ReindexTypeEnum } from '../../api/actions/queueReindex';
 import updateWatchedState from '../../api/actions/updateWatchedState';
-import useIsAdmin from '../../functions/useIsAdmin';
+import useCanManageApp from '../../functions/useCanManageApp';
 import { useUserConfigStore } from '../../stores/UserConfigStore';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
@@ -52,7 +52,7 @@ export default function Channel() {
   const videoId = params.get('videoId');
   const { userConfig, setUserConfig } = useUserConfigStore();
   const { filterHeight } = useFilterBarTempConf();
-  const admin = Boolean(useIsAdmin());
+  const admin = Boolean(useCanManageApp());
   const lastSegment = location.pathname.split('/').filter(Boolean).at(-1);
   const tab = ['streams', 'shorts', 'playlist', 'about'].includes(lastSegment ?? '')
     ? lastSegment === 'playlist'
