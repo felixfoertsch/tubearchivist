@@ -81,13 +81,13 @@ test('constructive actions are primary; utilities and destructive consent stay d
   assert.equal(subscription['aria-pressed'], undefined);
 });
 
-test('data-replacing snapshot and backup restore launchers stay destructive', () => {
-  assert.equal(button('pages/SettingsApplication.tsx', 'Restore').variant, '"destructive"');
+test('database backup deletion stays destructive; download stays utility', () => {
   assert.equal(
-    button('pages/SettingsActions.tsx', "{pending === backup.filename ? 'Queuing…' : 'Restore'}")
+    button('pages/SettingsActions.tsx', "{pending === backup.filename ? 'Working…' : 'Delete'}")
       .variant,
     '"destructive"',
   );
+  assert.equal(button('pages/SettingsActions.tsx', 'Download').variant, '"outline"');
 });
 
 test('stock button renders semantic variant, pressed state, and native disabled guard', () => {

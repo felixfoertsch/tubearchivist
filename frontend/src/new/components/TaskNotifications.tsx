@@ -1,4 +1,3 @@
-import { useConfirm } from './useConfirm';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CircleAlert, Download, LoaderCircle } from 'lucide-react';
@@ -16,26 +15,16 @@ import { CollectionImage } from './Collection';
 const QUEUE_PREVIEW = 5;
 
 function useTaskStop() {
-  const { confirm, dialog } = useConfirm();
   const [stopping, setStopping] = useState<string>();
   const [error, setError] = useState('');
-  const stop = async (id: string, command: 'stop' | 'kill') => {
+  const stop = async (id: string) => {
     if (stopping) return;
-    setStopping(`${id}:${command}`);
+    setStopping(id);
     setError('');
     try {
-      if (
-        command === 'kill' &&
-        !(await confirm({
-          title: 'Force terminate task?',
-          description: `Task ${id}: work in progress may remain incomplete.`,
-          actionLabel: 'Kill',
-        }))
-      )
-        return;
       const response = await APIClient(`/api/task/by-id/${encodeURIComponent(id)}/`, {
         method: 'POST',
-        body: { command },
+        body: { command: 'stop' },
       });
       if (response.error || response.status < 200 || response.status >= 300)
         throw new Error(response.error?.error ?? `Request failed (${response.status})`);
@@ -49,28 +38,22 @@ function useTaskStop() {
     task.api_stop &&
     task.command !== 'STOP' &&
     task.command !== 'KILL' && (
-      <div className="flex gap-1">
-        {(['stop', 'kill'] as const).map(command => (
-          <Button
-            key={command}
-            variant="destructive"
-            size="sm"
-            disabled={stopping !== undefined}
-            aria-label={`${command === 'stop' ? 'Stop' : 'Kill'} ${task.title}`}
-            onClick={() => void stop(task.id, command)}
-          >
-            {stopping === `${task.id}:${command}`
-              ? command === 'stop'
-                ? 'Stopping…'
-                : 'Killing…'
-              : command === 'stop'
-                ? 'Stop'
-                : 'Kill'}
-          </Button>
-        ))}
+      <div className="space-y-1">
+        <Button
+          variant="destructive"
+          size="sm"
+          disabled={stopping !== undefined}
+          aria-label={`Stop ${task.title}`}
+          onClick={() => void stop(task.id)}
+        >
+          {stopping === task.id ? 'Stopping…' : 'Stop'}
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          Stop is cooperative. Force termination is unsupported.
+        </p>
       </div>
     );
-  return { dialog, error, controls };
+  return { error, controls };
 }
 
 export function TaskProgress({ task, label }: { task: Task; label: string }) {
@@ -88,11 +71,10 @@ export function TaskProgress({ task, label }: { task: Task; label: string }) {
 // Full task details for the Downloads page. Per-video progress renders on the queue item.
 export default function TaskNotifications() {
   const { tasks, error: loadError } = useTaskStore();
-  const { dialog, error, controls } = useTaskStop();
+  const { error, controls } = useTaskStop();
   if (!tasks.length && !loadError && !error) return null;
   return (
     <div className="space-y-2" aria-live="polite">
-      {dialog}
       {(loadError || error) && (
         <Alert variant="destructive">
           <CircleAlert />
@@ -126,7 +108,7 @@ export default function TaskNotifications() {
 
 export function TaskIndicator() {
   const { tasks, error: loadError, advanced } = useTaskStore();
-  const { dialog, error, controls } = useTaskStop();
+  const { error, controls } = useTaskStop();
   const [open, setOpen] = useState(false);
   const [retry, setRetry] = useState(0);
   const key = `${advanced}:${retry}`;
@@ -176,7 +158,6 @@ export function TaskIndicator() {
         if (next) setRetry(value => value + 1);
       }}
     >
-      {dialog}
       <PopoverTrigger asChild>
         <Button variant="ghost" size="sm" aria-label={label} title={label}>
           {failed ? (

@@ -3,13 +3,13 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
-function load(path) {
+function load(path, imports = {}) {
   const exports = {};
   runInNewContext(
     ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), {
       compilerOptions: { module: ts.ModuleKind.CommonJS },
     }).outputText,
-    { exports },
+    { exports, require: name => imports[name] || {} },
   );
   return exports;
 }
@@ -30,12 +30,15 @@ test('watch progress ratio formats as percent', () => {
   assert.match(statsProgress(0.5), /50/);
   assert.match(statsProgress(1), /100/);
 });
-const { backupDate } = load('../src/new/lib/settingsBackup.ts');
-test('backup filename dates display ISO without timezone shifts', () => {
-  assert.equal(backupDate('20240229'), '2024-02-29');
-  assert.equal(backupDate('20260229'), 'Unknown date');
-  assert.equal(backupDate('20261301'), 'Unknown date');
-  assert.equal(backupDate('bad'), 'Unknown date');
+const { backupDate } = load('../src/new/lib/settingsBackup.ts', {
+  './settingsApplication': load('../src/new/lib/settingsApplication.ts'),
+});
+test('native backup timestamps display ISO local time; malformed dates fail closed', () => {
+  const date = new Date('2024-02-29T12:30:00Z');
+  const expected = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  assert.equal(backupDate('20240229T123000Z'), expected);
+  for (const value of ['20260229T120000Z', '20240229', 'bad'])
+    assert.equal(backupDate(value), 'Unknown date');
 });
 test('scheduler preserves cron protocol and both config keys without defaults', () => {
   assert.equal(JSON.stringify(scheduleConfig('days', '90')), '{"config":{"days":90}}');

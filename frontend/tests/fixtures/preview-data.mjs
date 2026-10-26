@@ -200,7 +200,7 @@ export function previewData() {
       integrate_ryd: false,
       integrate_sponsorblock: false,
     },
-    application: { enable_snapshot: true, enable_cast: false },
+    application: { enable_snapshot: false, enable_cast: false },
   };
   const total = { doc_count: 1, media_size: 4096, duration: 120, duration_str: '00:02:00' };
   const comment = {
@@ -254,28 +254,12 @@ export function previewData() {
     cookie: { cookie_enabled: false, status: false },
     token: 'LOCAL_FIXTURE_TOKEN_NOT_VALID',
     membershipToken: 'LOCAL_FIXTURE_MEMBERSHIP_NOT_VALID',
-    snapshots: {
-      next_exec: 1768298400,
-      next_exec_str: '2026-01-13 10:00',
-      expire_after: '30d',
-      snapshots: [
-        {
-          id: 'local-snapshot',
-          state: 'SUCCESS',
-          es_version: '8.17.0',
-          start_date: '2026-01-12 10:00',
-          end_date: '2026-01-12 10:01',
-          end_stamp: 1768212060,
-          duration_s: 60,
-        },
-      ],
-    },
     backups: [
       {
-        filename: 'local-backup.zip',
-        file_path: '/local-fixture/local-backup.zip',
+        filename: 'ta_backup-20260112T100000Z-manual.dump',
+        file_path: '/local-fixture/ta_backup-20260112T100000Z-manual.dump',
         file_size: 4096,
-        timestamp: '2026-01-12T10:00:00Z',
+        timestamp: '20260112T100000Z',
         reason: 'manual',
       },
     ],

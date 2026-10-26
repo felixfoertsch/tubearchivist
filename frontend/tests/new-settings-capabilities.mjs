@@ -6,10 +6,6 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { previewData } from './fixtures/preview-data.mjs';
-import { readFileSync } from 'node:fs';
-import { runInNewContext } from 'node:vm';
-import ts from 'typescript';
-
 test('validated application saves update shared capabilities only on success', async () => {
   const cacheDir = await mkdtemp(join(tmpdir(), 'ta-settings-capabilities-'));
   const original = {
@@ -47,14 +43,14 @@ test('validated application saves update shared capabilities only on success', a
       await assert.rejects(saveApplicationSetting('application', 'enable_cast', false));
       assert.equal(useAppSettingsStore.getState().appSettingsConfig, saved);
     }
-    // Disabled snapshots make the backend serializer fail with 500; settings must still load.
+    // Retired snapshot endpoint must never be requested.
     const { loadApplicationSettings } = await server.ssrLoadModule(
       '/src/new/lib/settingsApplication.ts',
     );
     const fixture = previewData();
     globalThis.fetch = async url => {
       const path = String(url);
-      if (path.endsWith('/snapshot/')) return new Response('{}', { status: 500 });
+      assert.ok(!path.includes('/snapshot/'));
       const body = path.endsWith('/token/')
         ? { token: 'fixture-token' }
         : path.endsWith('/cookie/')
@@ -63,7 +59,7 @@ test('validated application saves update shared capabilities only on success', a
       return new Response(JSON.stringify(body), { status: 200 });
     };
     const loaded = await loadApplicationSettings();
-    assert.equal(loaded.snapshots, null);
+    assert.equal(loaded.snapshots, undefined);
     assert.equal(loaded.token, 'fixture-token');
   } finally {
     await server?.close();
@@ -72,71 +68,5 @@ test('validated application saves update shared capabilities only on success', a
       if (value === undefined) delete globalThis[key];
       else globalThis[key] = value;
     }
-  }
-});
-
-test('unsuccessful snapshots disable Restore and guard programmatic clicks', () => {
-  const source = ts.transpileModule(
-    readFileSync(new URL('../src/new/pages/SettingsApplication.tsx', import.meta.url), 'utf8'),
-    { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } },
-  ).outputText;
-  for (const snapshotState of ['SUCCESS', 'FAILED', 'PARTIAL', 'IN_PROGRESS']) {
-    const data = previewData();
-    data.snapshots.snapshots[0].state = snapshotState;
-    let index = 0,
-      confirmations = 0;
-    const jsx = (type, props) => ({ type, props });
-    const exports = {};
-    runInNewContext(source, {
-      exports,
-      require: path => {
-        if (path === 'react/jsx-runtime') return { jsx, jsxs: jsx };
-        if (path === 'react')
-          return {
-            useState: initial => [
-              index++ === 0
-                ? {
-                    settings: data.config,
-                    snapshots: data.snapshots,
-                    cookie: data.cookie,
-                    token: data.token,
-                  }
-                : initial,
-              () => {},
-            ],
-            useEffect() {},
-          };
-        if (path.endsWith('/useConfirm'))
-          return {
-            useConfirm: () => ({
-              confirm: async () => {
-                confirmations++;
-                return false;
-              },
-            }),
-          };
-        if (path.endsWith('/useIsAdmin')) return () => true;
-        if (path.endsWith('/settingsApplication')) return { isoDateTime: () => '2026-01-12 10:00' };
-        return new Proxy({}, { get: () => () => null });
-      },
-    });
-    const root = exports.default();
-    const page = root.type(root.props);
-    const find = node => {
-      if (!node || typeof node !== 'object') return;
-      if (node.props?.children === 'Restore') return node;
-      const children = node.props?.children ?? node;
-      if (Array.isArray(children)) {
-        for (const child of children.flat(Infinity)) {
-          const found = find(child);
-          if (found) return found;
-        }
-      } else if (children !== node) return find(children);
-    };
-    const button = find(page);
-    assert.ok(button);
-    assert.equal(button.props.disabled, snapshotState !== 'SUCCESS');
-    button.props.onClick();
-    assert.equal(confirmations, snapshotState === 'SUCCESS' ? 1 : 0);
   }
 });

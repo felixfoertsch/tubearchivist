@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import type { BackupListType } from '../../api/loader/loadBackupList';
 import useIsAdmin from '../../functions/useIsAdmin';
 import { requestJson, settingsError } from '../lib/settings';
-import { backupDate } from '../lib/settingsBackup';
+import { backupDate, validateBackups, downloadBackup } from '../lib/settingsBackup';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Checkbox } from '../ui/checkbox';
@@ -104,19 +104,9 @@ function Actions() {
     const controller = new AbortController();
     requestJson<unknown>('/api/appsettings/backup/', { signal: controller.signal })
       .then(value => {
-        if (
-          !Array.isArray(value) ||
-          !value.every(
-            item =>
-              item &&
-              typeof item.filename === 'string' &&
-              typeof item.timestamp === 'string' &&
-              typeof item.reason === 'string',
-          )
-        )
-          throw new Error('Invalid backup list returned by server.');
+        const backups = validateBackups(value);
         if (!controller.signal.aborted) {
-          setBackups(value);
+          setBackups(backups);
           setError('');
         }
       })
@@ -142,8 +132,8 @@ function Actions() {
           danger
         />
         <Action
-          title="Start ZIP backup"
-          help="Export index to cache/backup. ZIP backups are slow and consistency is not guaranteed; prefer snapshots. Ensure no other tasks are running."
+          title="Create database backup"
+          help="Create a native PostgreSQL database backup in cache/backup. Media files are not included. Protect downloaded dumps as sensitive database data."
           endpoint="/api/appsettings/backup/"
         />
         <Action
@@ -155,9 +145,10 @@ function Actions() {
         />
       </div>
       <Card className="gap-3 p-4">
-        <h3 className="font-semibold">Restore ZIP backup</h3>
+        <h3 className="font-semibold">Database backups</h3>
         <p className="text-sm">
-          Restore replaces current index with selected backup from cache/backup.
+          List, download or permanently delete native PostgreSQL database backups. Media files are
+          not included.
         </p>
         <Button variant="outline" onClick={() => setRevision(value => value + 1)}>
           Reload backups
@@ -168,19 +159,20 @@ function Actions() {
           </p>
         )}
         {message && <p role="status">{message}</p>}
-        {!backups ? (
+        {!backups && !error ? (
           <p role="status">Loading backups…</p>
-        ) : backups.length === 0 ? (
+        ) : !backups ? null : backups.length === 0 ? (
           <p>No backups found.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <caption className="sr-only">Available ZIP backups</caption>
+              <caption className="sr-only">Available database backups</caption>
               <thead>
                 <tr>
                   <th className="p-2">Filename</th>
                   <th className="p-2">Timestamp</th>
                   <th className="p-2">Source</th>
+                  <th className="p-2">Size (bytes)</th>
                   <th className="p-2">Action</th>
                 </tr>
               </thead>
@@ -190,7 +182,26 @@ function Actions() {
                     <td className="max-w-64 break-all p-2">{backup.filename}</td>
                     <td className="whitespace-nowrap p-2">{backupDate(backup.timestamp)}</td>
                     <td className="p-2">{backup.reason}</td>
+                    <td className="p-2">{backup.file_size.toLocaleString()}</td>
                     <td className="p-2">
+                      <Button
+                        variant="outline"
+                        disabled={!!pending}
+                        onClick={async () => {
+                          if (pending) return;
+                          setPending(backup.filename);
+                          setError('');
+                          try {
+                            await downloadBackup(backup.filename);
+                          } catch (error) {
+                            setError(settingsError(error));
+                          } finally {
+                            setPending('');
+                          }
+                        }}
+                      >
+                        Download
+                      </Button>
                       <Button
                         variant="destructive"
                         disabled={!!pending}
@@ -204,14 +215,16 @@ function Actions() {
                           try {
                             if (
                               !(await confirm({
-                                title: `Restore ${filename}?`,
-                                description: 'This replaces your existing index.',
-                                actionLabel: 'Restore',
+                                title: `Delete database backup ${filename}?`,
+                                description:
+                                  'Permanently delete this backup file. The running database and media files are unchanged.',
+                                actionLabel: 'Delete',
                               }))
                             )
                               return;
-                            await requestJson(endpoint, { method: 'POST' });
-                            setMessage('Restore queued. See task progress below.');
+                            await requestJson(endpoint, { method: 'DELETE' });
+                            setMessage('Database backup deleted.');
+                            setRevision(value => value + 1);
                           } catch (error) {
                             setError(settingsError(error));
                           } finally {
@@ -219,7 +232,7 @@ function Actions() {
                           }
                         }}
                       >
-                        {pending === backup.filename ? 'Queuing…' : 'Restore'}
+                        {pending === backup.filename ? 'Working…' : 'Delete'}
                       </Button>
                     </td>
                   </tr>
@@ -228,6 +241,39 @@ function Actions() {
             </table>
           </div>
         )}
+      </Card>
+      <Card className="gap-3 p-4">
+        <h3 className="font-semibold">Offline database restore</h3>
+        <p>
+          Online restore is disabled. Ask the instance operator to arrange maintenance;
+          administrator access in this UI does not grant server access.
+        </p>
+        <ol className="list-decimal space-y-2 pl-5 text-sm">
+          <li>
+            Verify a database backup and rollback plan. Legacy Elasticsearch ZIP/JSON archives
+            cannot restore PostgreSQL.
+          </li>
+          <li>
+            Stop all TubeArchivist web replicas, Procrastinate workers and scheduler. Ensure no
+            other database clients remain connected.
+          </li>
+          <li>
+            With PostgreSQL 18 server and client, run{' '}
+            <code>
+              python manage.py ta_restore_backup &lt;filename&gt; --target-database
+              &lt;configured-database&gt; --quiesced
+            </code>{' '}
+            in the application maintenance environment.
+          </li>
+          <li>
+            Validate restored data before restarting. Dumps include queue state; restored pending
+            jobs may run again. Review possible repeated effects first.
+          </li>
+        </ol>
+        <p className="text-sm">
+          Operator procedure: <code>backend/docs/postgresql-backup.md</code>. Media files require a
+          separate backup.
+        </p>
       </Card>
     </>
   );

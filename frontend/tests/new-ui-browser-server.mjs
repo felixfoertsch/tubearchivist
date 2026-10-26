@@ -62,7 +62,8 @@ const routes = [
   ['snapshot', /^\/api\/appsettings\/snapshot\/$/, ['GET', 'POST']],
   ['snapshot-item', /^\/api\/appsettings\/snapshot\/([\w-]+)\/$/, ['POST']],
   ['backup', /^\/api\/appsettings\/backup\/$/, ['GET', 'POST']],
-  ['backup-item', /^\/api\/appsettings\/backup\/([\w.-]+)\/$/, ['POST']],
+  ['backup-download', /^\/api\/appsettings\/backup\/([\w.-]+)\/download\/$/, ['GET']],
+  ['backup-item', /^\/api\/appsettings\/backup\/([\w.-]+)\/$/, ['POST', 'DELETE']],
   ['maintenance', /^\/api\/appsettings\/(manual-import|rescan-filesystem)\/$/, ['POST']],
   [
     'membership',
@@ -469,6 +470,7 @@ export function createPreviewServer({ dist = defaultDist, fixtureMedia } = {}) {
           'snapshot-item',
           'backup',
           'backup-item',
+          'backup-download',
           'maintenance',
           'membership',
         ];
@@ -957,6 +959,10 @@ export function createPreviewServer({ dist = defaultDist, fixtureMedia } = {}) {
               if (match[2] !== 'local-task') return send(404, { error: 'No fixture task' });
               if (!['stop', 'kill'].includes(body.command))
                 return send(400, { error: 'Invalid task command' });
+              if (body.command === 'kill')
+                return send(409, {
+                  error: 'Force termination is unsupported. Use cooperative Stop.',
+                });
               state.taskMode = 'idle';
               response.writeHead(204);
               return response.end();
@@ -976,9 +982,25 @@ export function createPreviewServer({ dist = defaultDist, fixtureMedia } = {}) {
             if (write) data.token = 'LOCAL_FIXTURE_TOKEN_REVOKED';
             return send(200, { token: data.token });
           case 'snapshot':
-            return write ? ok() : send(200, data.snapshots);
+            return send(410, { error: 'Snapshots are unsupported. Use database backups.' });
           case 'backup':
             return write ? ok() : send(200, empty ? [] : data.backups);
+          case 'backup-download': {
+            const backup = data.backups.find(item => item.filename === match[1]);
+            if (!backup) return send(404, { error: 'file not found' });
+            response.writeHead(200, {
+              'Content-Type': 'application/octet-stream',
+              'Content-Disposition': `attachment; filename="${backup.filename}"`,
+            });
+            return response.end('PGDMP synthetic fixture only');
+          }
+          case 'backup-item':
+            if (request.method === 'POST')
+              return send(409, { error: 'Online restore is disabled.' });
+            if (!data.backups.some(item => item.filename === match[1]))
+              return send(404, { error: 'file not found' });
+            data.backups = data.backups.filter(item => item.filename !== match[1]);
+            return send(204);
           case 'membership':
             if (match[1] === 'token') {
               if (request.method === 'POST')
@@ -1003,7 +1025,6 @@ export function createPreviewServer({ dist = defaultDist, fixtureMedia } = {}) {
             if (match[1] === 'sync' && request.method === 'POST') return ok();
             return send(501, { error: 'Unhandled local API method' });
           case 'snapshot-item':
-          case 'backup-item':
           case 'maintenance':
             return ok();
           default:

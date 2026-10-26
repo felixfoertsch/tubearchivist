@@ -171,11 +171,15 @@ test('local preview HTTP boundary, modes, permissions and in-memory writes', asy
     assert.equal((await call('/api/notification/')).data[0].level, 'error');
     for (const command of ['stop', 'kill']) {
       await call('/__preview__/state', { taskMode: 'running' });
-      assert.deepEqual(await call('/api/task/by-id/local-task/', { command }), {
-        status: 204,
-        data: '',
-      });
-      assert.deepEqual((await call('/api/notification/')).data, []);
+      const result = await call('/api/task/by-id/local-task/', { command });
+      if (command === 'kill') {
+        assert.equal(result.status, 409);
+        assert.match(result.data.error, /unsupported/);
+        assert.equal((await call('/__preview__/state')).data.taskMode, 'running');
+      } else {
+        assert.deepEqual(result, { status: 204, data: '' });
+        assert.deepEqual((await call('/api/notification/')).data, []);
+      }
     }
     const taskActions = (await call('/__preview__/state')).data.actions.filter(
       action => action.route === 'task',

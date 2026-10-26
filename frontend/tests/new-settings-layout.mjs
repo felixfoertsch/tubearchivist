@@ -33,7 +33,8 @@ test('unified settings renders one frame and visible role-gated sections', async
       const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
       assert.equal(new Set(ids).size, ids.length);
       assert.doesNotMatch(html, /<form[^>]*>(?:(?!<\/form>)[\s\S])*<form/);
-      if (!is_staff) assert.doesNotMatch(html, /Loading application|Loading schedule|Restore ZIP/);
+      if (!is_staff)
+        assert.doesNotMatch(html, /Loading application|Loading schedule|Database backups/);
     }
   } finally {
     await server.close();

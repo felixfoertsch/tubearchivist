@@ -2,7 +2,6 @@ import { useConfirm } from '../components/useConfirm';
 import { useEffect, useState } from 'react';
 import useIsAdmin from '../../functions/useIsAdmin';
 import type { AppSettingsConfigType } from '../../api/loader/loadAppsettingsConfig';
-import type { SnapshotListType } from '../../api/loader/loadSnapshots';
 import type { CookieStateType } from '../../api/loader/loadCookie';
 import { SettingsApplicationSection } from '../components/SettingsApplicationSections';
 import {
@@ -19,7 +18,6 @@ import { Checkbox } from '../ui/checkbox';
 
 type State = {
   settings: AppSettingsConfigType;
-  snapshots: SnapshotListType | null;
   token: string;
   cookie: CookieStateType;
 };
@@ -139,7 +137,6 @@ function AdminSettings() {
   const [cookieEntry, setCookieEntry] = useState(false);
   const [cookieReveal, setCookieReveal] = useState(false);
   const [tokenVisible, setTokenVisible] = useState(false);
-  const [visibleSnapshots, setVisibleSnapshots] = useState(10);
   async function refresh() {
     try {
       const result = await loadApplicationSettings();
@@ -508,69 +505,6 @@ function AdminSettings() {
               Enable Cast
             </label>
             <Membership />
-          </SettingsApplicationSection>
-          <SettingsApplicationSection title="Snapshots">
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={data.settings.application.enable_snapshot}
-                disabled={!!pending}
-                onCheckedChange={checked =>
-                  void mutate('Snapshots', () =>
-                    setConfig('application', 'enable_snapshot', checked === true),
-                  )
-                }
-              />
-              Enable index snapshots
-            </label>
-            <p className="text-sm">
-              {data.snapshots
-                ? `Next snapshot: ${isoDateTime(data.snapshots.next_exec)}; expires after ${data.snapshots.expire_after}.`
-                : 'No snapshot policy available.'}
-            </p>
-            <Button
-              variant="default"
-              disabled={!!pending || !data.settings.application.enable_snapshot}
-              onClick={() =>
-                void mutate('create snapshot', () =>
-                  requestJson('/api/appsettings/snapshot/', { method: 'POST' }).then(
-                    () => undefined,
-                  ),
-                )
-              }
-            >
-              Create snapshot now
-            </Button>
-            {(data.snapshots?.snapshots || []).slice(0, visibleSnapshots).map(snapshot => (
-              <div key={snapshot.id} className="flex flex-wrap items-center gap-2 text-sm">
-                <span>
-                  {isoDateTime(snapshot.end_stamp - snapshot.duration_s)}, {snapshot.duration_s}s,{' '}
-                  {snapshot.state}
-                </span>
-                <Button
-                  variant="destructive"
-                  disabled={!!pending || snapshot.state !== 'SUCCESS'}
-                  onClick={() =>
-                    snapshot.state === 'SUCCESS' &&
-                    void mutate(
-                      'restore snapshot',
-                      () =>
-                        requestJson(
-                          `/api/appsettings/snapshot/${encodeURIComponent(snapshot.id)}/`,
-                          { method: 'POST' },
-                        ).then(() => undefined),
-                      true,
-                    )
-                  }
-                >
-                  Restore
-                </Button>
-              </div>
-            ))}
-            {(data.snapshots?.snapshots?.length || 0) > visibleSnapshots && (
-              <Button variant="outline" onClick={() => setVisibleSnapshots(count => count + 10)}>
-                Load more
-              </Button>
-            )}
           </SettingsApplicationSection>
         </>
       )}

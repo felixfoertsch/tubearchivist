@@ -1,6 +1,5 @@
 import APIClient from '../../functions/APIClient';
 import type { AppSettingsConfigType } from '../../api/loader/loadAppsettingsConfig';
-import type { SnapshotListType } from '../../api/loader/loadSnapshots';
 import type { CookieStateType } from '../../api/loader/loadCookie';
 import { useAppSettingsStore } from '../../stores/AppSettingsStore';
 
@@ -57,33 +56,6 @@ export function validateAppSettings(value: unknown): AppSettingsConfigType {
     throw new Error('Invalid application settings values.');
   return value as AppSettingsConfigType;
 }
-export function validateSnapshots(value: unknown): SnapshotListType {
-  const data = record(value, 'snapshots');
-  if (
-    typeof data.next_exec !== 'number' ||
-    !Number.isFinite(data.next_exec) ||
-    typeof data.expire_after !== 'string'
-  )
-    throw new Error('Invalid snapshot metadata.');
-  if (
-    data.snapshots !== undefined &&
-    data.snapshots !== false &&
-    (!Array.isArray(data.snapshots) ||
-      !data.snapshots.every(item => {
-        const snapshot = record(item, 'snapshot');
-        return (
-          typeof snapshot.id === 'string' &&
-          typeof snapshot.state === 'string' &&
-          typeof snapshot.duration_s === 'number' &&
-          Number.isFinite(snapshot.duration_s) &&
-          typeof snapshot.end_stamp === 'number' &&
-          Number.isFinite(snapshot.end_stamp)
-        );
-      }))
-  )
-    throw new Error('Invalid snapshot list.');
-  return data as unknown as SnapshotListType;
-}
 export function validateCookie(value: unknown): CookieStateType {
   const cookie = record(value, 'cookie');
   if (
@@ -106,9 +78,8 @@ export function isoDateTime(value: string | number): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 export async function loadApplicationSettings() {
-  const [settings, snapshots, token, cookie] = await Promise.all([
+  const [settings, token, cookie] = await Promise.all([
     APIClient<unknown>('/api/appsettings/config/'),
-    APIClient<unknown>('/api/appsettings/snapshot/'),
     APIClient<unknown>('/api/appsettings/token/'),
     APIClient<unknown>('/api/appsettings/cookie/'),
   ]);
@@ -117,11 +88,6 @@ export async function loadApplicationSettings() {
     throw new Error('Invalid API token response.');
   return {
     settings: validateAppSettings(requireData(settings, 'Application settings')),
-    // Backend answers 500 while snapshots are disabled; keep other settings usable.
-    snapshots:
-      snapshots.status >= 200 && snapshots.status < 300 && snapshots.data !== undefined
-        ? validateSnapshots(snapshots.data)
-        : null,
     token: tokenData.token,
     cookie: validateCookie(requireData(cookie, 'Cookie status')),
   };

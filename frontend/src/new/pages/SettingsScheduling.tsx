@@ -15,7 +15,7 @@ const tasks = [
   ['download_pending', 'Start downloads'],
   ['check_reindex', 'Refresh metadata'],
   ['thumbnail_check', 'Thumbnail check'],
-  ['run_backup', 'ZIP index backup'],
+  ['run_backup', 'Database backup'],
 ] as const;
 
 function ScheduleEditor({
@@ -89,8 +89,8 @@ function ScheduleEditor({
       </p>
       {name === 'run_backup' && (
         <p className="text-sm">
-          ZIP backups are slow and may be inconsistent. Prefer snapshots; run with no other tasks
-          active.
+          Creates native PostgreSQL database backups. Retention applies only to automatic backups
+          after successful creation; manual and update backups are kept.
         </p>
       )}
       <form

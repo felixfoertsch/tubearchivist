@@ -14,7 +14,7 @@ function load(path) {
   );
   return exports;
 }
-const { requireData, validateAppSettings, validateSnapshots, validateCookie, isoDateTime } = load(
+const { requireData, validateAppSettings, validateCookie, isoDateTime } = load(
   '../src/new/lib/settingsApplication.ts',
 );
 const validSettings = {
@@ -83,14 +83,6 @@ test('API response data requires success status and data', () => {
   assert.equal(requireData({ status: 200, data }, 'settings'), data);
   assert.throws(() => requireData({ status: 403, data }, 'settings'), /request failed/);
   assert.throws(() => requireData({ status: 200 }, 'settings'), /request failed/);
-});
-test('snapshots validate server fields and preserve disabled sentinel', () => {
-  const snapshots = { next_exec: 1_800_000_000, expire_after: '30d', snapshots: false };
-  assert.equal(validateSnapshots(snapshots).snapshots, false);
-  assert.throws(
-    () => validateSnapshots({ ...snapshots, snapshots: [{ id: 'x', state: 'SUCCESS' }] }),
-    /snapshot list/,
-  );
 });
 test('cookie validation accepts absent optional fields and rejects malformed fields', () => {
   assert.equal(validateCookie({ cookie_enabled: false }).cookie_enabled, false);
