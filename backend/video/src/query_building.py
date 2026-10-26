@@ -1,7 +1,8 @@
 """Build PostgreSQL video-list querysets and validate legacy query options."""
 
 from common.src.runtime import RuntimeStore
-from django.db.models import Case, IntegerField, When
+from django.db.models import Case, F, IntegerField, When
+from django.db.models.expressions import RawSQL
 from playlist.models import Playlist, PlaylistEntry
 from video.models import Video
 from video.src.constants import OrderEnum, SortEnum, VideoTypeEnum, WatchedEnum
@@ -104,6 +105,27 @@ class QueryBuilder:
             "streams.width": "metadata__streams__width",
             "streams.height": "metadata__streams__height",
         }[field]
+        if field in {"streams.width", "streams.height"}:
+            dimension = field.removeprefix("streams.")
+            aggregate = "MIN" if direction["order"] == "asc" else "MAX"
+            queryset = queryset.annotate(
+                _stream_dimension=RawSQL(
+                    "(SELECT " + aggregate + "((stream->>%s)::numeric) "
+                    "FROM jsonb_array_elements("
+                    "video_video.metadata->'streams') AS stream "
+                    "WHERE stream->>%s ~ '^[0-9]+$')",
+                    [dimension, dimension],
+                )
+            )
+            dimension_order = F("_stream_dimension")
+            return queryset.order_by(
+                (
+                    dimension_order.asc(nulls_last=True)
+                    if direction["order"] == "asc"
+                    else dimension_order.desc(nulls_last=True)
+                ),
+                "pk",
+            )
         return queryset.order_by(
             ("" if direction["order"] == "asc" else "-") + lookup, "pk"
         )

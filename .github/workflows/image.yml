@@ -14,6 +14,28 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:18.6-trixie
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: ta_ci_admin
+          POSTGRES_PASSWORD: ci-admin-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ta_ci_admin -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: tubearchivist
+      POSTGRES_USER: ta_app
+      POSTGRES_PASSWORD: test-only-password
+      DJANGO_SETTINGS_MODULE: config.settings
+      PYTHONPATH: backend
     steps:
       - uses: actions/checkout@v6
         with:
@@ -34,14 +56,32 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc libldap2-dev libsasl2-dev libssl-dev
+          sudo apt-get install -y gcc libldap2-dev libsasl2-dev libssl-dev postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-18
+          echo '/usr/lib/postgresql/18/bin' >> "$GITHUB_PATH"
           python -m pip install -r requirements-dev.txt
           npm ci --prefix frontend
+      - name: Prepare isolated PostgreSQL test roles
+        run: |
+          docker exec -e PGPASSWORD "$POSTGRES_CONTAINER" psql -U ta_ci_admin -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE ta_app LOGIN PASSWORD 'test-only-password' NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS;"
+          docker exec -e PGPASSWORD "$POSTGRES_CONTAINER" psql -U ta_ci_admin -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE tubearchivist OWNER ta_app;"
+          docker exec -e PGPASSWORD "$POSTGRES_CONTAINER" psql -U ta_ci_admin -d tubearchivist -v ON_ERROR_STOP=1 -c "CREATE EXTENSION pg_trgm;"
+          docker exec -e PGPASSWORD "$POSTGRES_CONTAINER" psql -U ta_ci_admin -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE test_tubearchivist OWNER ta_app;"
+          docker exec -e PGPASSWORD "$POSTGRES_CONTAINER" psql -U ta_ci_admin -d test_tubearchivist -v ON_ERROR_STOP=1 -c "CREATE EXTENSION pg_trgm;"
+        env:
+          PGPASSWORD: ci-admin-only-password
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+      - name: Test PostgreSQL backend including native backup
+        env:
+          PG_ADMIN_USER: ta_ci_admin
+          PG_ADMIN_DB: postgres
+          PG_ADMIN_PASSWORD: ci-admin-only-password
+        run: pytest backend --reuse-db
       - name: Validate source
         run: |
           node scripts/test-workflow.mjs
           pre-commit run --all-files
-          pytest backend
           npm run --prefix frontend build
           node --test frontend/tests/*.mjs
           git diff --exit-code
@@ -58,6 +98,22 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+      - name: Verify restricted container startup
+        run: |
+          sudo apt-get install -y skopeo
+          skopeo copy --override-arch amd64 "oci-archive:${{ runner.temp }}/candidate.tar" docker-daemon:ta-ci:check
+          docker run -d --name ta-ci-check --network host --user 99:100 --tmpfs /cache:mode=1777 --tmpfs /youtube:mode=1777 -e POSTGRES_HOST -e POSTGRES_PORT -e POSTGRES_DB -e POSTGRES_USER -e POSTGRES_PASSWORD -e TA_HOST=http://localhost:8000 -e TA_USERNAME=ci -e TA_PASSWORD=ci-test-only -e TZ=UTC ta-ci:check
+          trap 'docker logs ta-ci-check; docker rm -f ta-ci-check' EXIT
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent http://localhost:8000/api/health/; then
+              test "$(docker exec ta-ci-check id -u)" = 99
+              test "$(docker exec ta-ci-check id -g)" = 100
+              exit 0
+            fi
+            test "$(docker inspect --format '{{.State.Running}}' ta-ci-check)" = true
+            sleep 2
+          done
+          exit 1
       - uses: actions/upload-artifact@v6
         if: github.event_name != 'pull_request'
         with:

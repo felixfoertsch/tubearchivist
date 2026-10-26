@@ -42,7 +42,9 @@ def test_native_backup_restore_roundtrip_isolated_database(tmp_path):
         "--command",
     ]
     env = os.environ.copy()
-    env["PGPASSWORD"] = EnvironmentSettings.POSTGRES_PASSWORD
+    env["PGPASSWORD"] = os.environ.get(
+        "PG_ADMIN_PASSWORD", EnvironmentSettings.POSTGRES_PASSWORD
+    )
     try:
         subprocess.run(
             admin + [f'CREATE DATABASE "{db}" OWNER ta_app'],
@@ -52,7 +54,26 @@ def test_native_backup_restore_roundtrip_isolated_database(tmp_path):
             text=True,
             timeout=20,
         )
-        app_env = env | {"POSTGRES_DB": db, "TA_CACHE_DIR": str(tmp_path)}
+        subprocess.run(
+            admin[:-6]
+            + [
+                "--dbname",
+                db,
+                "--no-password",
+                "--command",
+                "CREATE EXTENSION pg_trgm",
+            ],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        app_env = env | {
+            "POSTGRES_DB": db,
+            "TA_CACHE_DIR": str(tmp_path),
+            "PGPASSWORD": EnvironmentSettings.POSTGRES_PASSWORD,
+        }
         repo = Path(__file__).resolve().parents[2]
         manage = [sys.executable, "manage.py"]
         subprocess.run(

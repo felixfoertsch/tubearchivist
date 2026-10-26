@@ -65,12 +65,23 @@ COPY --from=ffmpeg-builder \
     ./ffprobe/ffprobe \
     /usr/bin/
 
-# install distro packages needed
+# install distro packages needed, including PostgreSQL 18 native backup tools
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         atomicparsley \
         tini \
         curl \
+        ca-certificates \
+        gnupg \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        | gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg \
+    && gpg --show-keys --with-colons /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg | awk -F: '$10 == "B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8" {found=1} END {exit !found}' \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-18 \
+    && pg_dump --version | grep -Eq ' 18([.]|$)' \
+    && pg_restore --version | grep -Eq ' 18([.]|$)' \
     && mkdir -p /cache /youtube \
     && rm -rf /var/lib/apt/lists/*
 
@@ -79,7 +90,6 @@ COPY ./backend /app
 COPY --chmod=755 \
     ./docker_assets/run.sh \
     ./docker_assets/backend_start.py \
-    ./docker_assets/beat_auto_spawn.sh \
     /app/
 
 COPY --from=node-builder ./frontend/dist /app/static

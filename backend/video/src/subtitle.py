@@ -365,7 +365,7 @@ class SubtitleParser:
     @staticmethod
     def _ms_conv(ms):
         """convert ms to timestamp"""
-        ms = float(ms)
+        ms = round(float(ms))
         hours = str(int(ms // (1000 * 60 * 60)) % 24).zfill(2)
         minutes = str(int(ms // (1000 * 60)) % 60).zfill(2)
         secs = str(int(ms // 1000) % 60).zfill(2)

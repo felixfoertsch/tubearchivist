@@ -1,5 +1,7 @@
 """Subtitle metadata round-trips through native PostgreSQL storage."""
 
+import json
+
 import pytest
 from channel.models import Channel
 from common.src.domain import save_video
@@ -137,20 +139,40 @@ def test_index_new_video_saves_before_checking_subtitles(
             {"streams": [], "media_size": 1}
         ),
     )
-    monkeypatch.setattr(
-        index.YoutubeSubtitle,
-        "_make_request",
-        lambda self, url, lang: (
+    requests = []
+
+    def subtitle_request(self, url, lang):
+        requests.append(url)
+        if len(requests) == 1:
+            raise ConnectionError("interrupted subtitle download")
+        return (
             '{"events":[{"tStartMs":1250,"dDurationMs":750,'
             '"segs":[{"utf8":"Indexed subtitle"}]}]}'
-        ),
+        )
+
+    monkeypatch.setattr(
+        index.YoutubeSubtitle, "_make_request", subtitle_request
     )
     monkeypatch.setattr("video.src.subtitle.rand_sleep", lambda config: None)
     monkeypatch.setattr(
         index.ThumbManager, "download_video_thumb", lambda self, url: None
     )
 
+    with pytest.raises(ConnectionError, match="interrupted subtitle"):
+        index_new_video("subtitle-index-video")
+    assert Video.objects.filter(pk="subtitle-index-video").count() == 1
+    assert not SubtitleFragment.objects.filter(
+        video_id="subtitle-index-video"
+    ).exists()
     result = index_new_video("subtitle-index-video")
+    index_new_video("subtitle-index-video")
+    assert Video.objects.filter(pk="subtitle-index-video").count() == 1
+    assert (
+        SubtitleFragment.objects.filter(
+            video_id="subtitle-index-video"
+        ).count()
+        == 1
+    )
 
     assert result["youtube_id"] == "subtitle-index-video"
     assert result["subtitles"][0]["lang"] == "en"
@@ -272,6 +294,36 @@ def test_parser_wire_timestamp_strings_replace_database_fragments():
         2.0,
         "Parsed line",
     )
+
+
+@pytest.mark.parametrize(
+    ("start_ms", "duration_ms", "expected_start", "expected_end"),
+    [
+        (1, 2, "00:00:00.001", "00:00:00.003"),
+        (999, 2, "00:00:00.999", "00:00:01.001"),
+    ],
+)
+def test_parser_rounds_milliseconds_before_timestamp_decomposition(
+    start_ms, duration_ms, expected_start, expected_end
+):
+    parser = SubtitleParser(
+        json.dumps(
+            {
+                "events": [
+                    {
+                        "tStartMs": start_ms,
+                        "dDurationMs": duration_ms,
+                        "segs": [{"utf8": "line"}],
+                    }
+                ]
+            }
+        ),
+        "en",
+        "user",
+    )
+    parser.process()
+    assert parser.all_cues[0]["start"] == expected_start
+    assert parser.all_cues[0]["end"] == expected_end
 
 
 def test_invalid_import_preserves_existing_fragments():

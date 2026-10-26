@@ -57,6 +57,7 @@ class PostgreSQLBackup:
             "--format=custom",
             "--no-owner",
             "--no-acl",
+            "--exclude-extension=pg_trgm",
             "--host",
             EnvironmentSettings.POSTGRES_HOST,
             "--port",

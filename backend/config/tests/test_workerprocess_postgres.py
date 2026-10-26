@@ -1,6 +1,7 @@
 """Exercise live worker concurrency and abrupt process death on PostgreSQL."""
 
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -73,15 +74,46 @@ def wait_for(predicate, process, seconds=15):
 
 def stop_worker(process):
     if process.poll() is None:
-        process.kill()
+        process.send_signal(signal.SIGKILL)
     process.wait(timeout=10)
     process.stderr.close()
+
+
+def start_command():
+    database = settings.DATABASES["default"]
+    env = os.environ | {
+        "DJANGO_SETTINGS_MODULE": "config.settings",
+        "POSTGRES_DB": database["NAME"],
+        "POSTGRES_HOST": database["HOST"],
+        "POSTGRES_PORT": str(database["PORT"]),
+        "POSTGRES_USER": database["USER"],
+        "POSTGRES_PASSWORD": database["PASSWORD"],
+        "PYTHONPATH": str(settings.BASE_DIR),
+    }
+    return subprocess.Popen(
+        [sys.executable, "manage.py", "ta_worker"],
+        cwd=settings.BASE_DIR,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
 
 
 def dispatch_job():
     from procrastinate.contrib.django import app
 
     app.configure_task("review.dispatch").defer()
+
+
+def test_management_command_starts_and_stops_exact_process():
+    process = start_command()
+    try:
+        wait_for(lambda: process.poll() is None, process)
+        time.sleep(1)
+        assert process.poll() is None
+    finally:
+        stop_worker(process)
+    assert process.poll() == -signal.SIGKILL
 
 
 def test_dispatcher_enqueues_before_held_job_completes(tmp_path):
