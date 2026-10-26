@@ -104,7 +104,7 @@ jobs:
           skopeo copy --override-arch amd64 "oci-archive:${{ runner.temp }}/candidate.tar" docker-daemon:ta-ci:check
           docker run -d --name ta-ci-check --network host --user 99:100 --tmpfs /cache:mode=1777 --tmpfs /youtube:mode=1777 -e POSTGRES_HOST -e POSTGRES_PORT -e POSTGRES_DB -e POSTGRES_USER -e POSTGRES_PASSWORD -e TA_HOST=http://localhost:8000 -e TA_USERNAME=ci -e TA_PASSWORD=ci-test-only -e TZ=UTC ta-ci:check
           trap 'docker logs ta-ci-check; docker rm -f ta-ci-check' EXIT
-          for attempt in $(seq 1 90); do
+          for _ in $(seq 1 90); do
             if curl --fail --silent http://localhost:8000/api/health/; then
               test "$(docker exec ta-ci-check id -u)" = 99
               test "$(docker exec ta-ci-check id -g)" = 100

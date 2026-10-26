@@ -3,7 +3,9 @@
 Independent hard fork of [Tube Archivist](https://github.com/tubearchivist/tubearchivist).
 `main` owns application source, tests, packaging, and CI. No patch replay or automatic upstream synchronization.
 
-Fork changes include runtime defaults, channel title filtering, simple-download metadata embedding, and bounded channel rolling windows. See [FORK.md](FORK.md) for behavior and deletion warnings.
+Development now uses only the modern UI and two services: TubeArchivist plus PostgreSQL 18. Elasticsearch, Redis, and Celery are no longer required. This is a fresh DEV instance on an isolated development host, not an in-place production migration; existing production remains unchanged. Native database backups replace legacy ZIP backups and snapshots; restore is offline only. See [FORK.md](FORK.md) for architecture, backup/cancel semantics, and deletion warnings.
+
+Fork changes also include runtime defaults, channel title filtering, simple-download metadata embedding, and bounded channel rolling windows.
 
 Images: `ghcr.io/felixfoertsch/tubearchivist:nightly` follows validated `main` pushes. Published non-prerelease releases publish their exact tag, `stable`, and `latest`. These are unofficial fork images, not upstream releases. Upstream documentation below remains for reference; its registry links and `deploy.sh` are not fork publication instructions.
 

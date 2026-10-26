@@ -31,6 +31,20 @@ Dispatch `preserve-stable.yml` with ref `main` and no inputs, only after review 
 
 Before dispatch, pause other registry writers and source pushes until verification finishes; the shared concurrency group serializes this repository's CI publishers but cannot lock external registry writers. GHCR alias writes have no conditional compare-and-swap here, so external-writer exclusion is an operational prerequisite, not a guaranteed registry lock. The writer checks current `main` before and after each alias copy, then independently reads both published aliases and configs. Ref updates and registry writes cannot be atomic; an external push during a copy can cause a failed run after one alias moved. Stop on failure, inspect both aliases, and retry only while the same reviewed commit remains current `main`. Do not bypass guards or automatically roll back. The manual preservation workflow performs no release, source build, `nightly` update, runtime pull, container restart, or data change. Pushing the preservation commit still triggers normal `image.yml` validation and a `nightly` rebuild of the same application source. After success, independently verify both aliases against the production digest before changing only the production configured update channel. Later Postgres work stays on `nightly`; stable publication still requires explicit non-prerelease release outside this narrow exception.
 
+## Development architecture and production isolation
+
+Development runs TubeArchivist plus PostgreSQL 18 only. Django models persist library metadata, configuration, runtime state, and search data; PostgreSQL full-text search and `pg_trgm` replace Elasticsearch. Procrastinate jobs and the application scheduler replace Redis/Celery. The modern UI is the only frontend; classic assets and theme selection are removed.
+
+Target is a fresh, separately named DEV instance on an isolated development host with its own database, credentials, cache, media paths, ports, and container names. Do not reuse production volumes or migrate existing production data. Existing production stays unchanged on its preserved image. `docker-compose.yml` is a local development example, not DockerMan deployment instructions. No production deployment is authorized by routine DEV delivery.
+
+Application uses a restricted PostgreSQL role. Bootstrap administrator preinstalls `pg_trgm`; administrator credentials belong only to bootstrap and disposable tests, never application runtime.
+
+## Native backups and task cancellation
+
+Admin UI lists, creates, downloads, and deletes native PostgreSQL `.dump` backups. Browser first checks authenticated admin access with HEAD, then streams the attachment natively; JavaScript does not buffer database dumps. Legacy ZIP backups and Elasticsearch snapshots are unsupported. Web restore is disabled; see [offline restore procedure](backend/docs/postgresql-backup.md) for quiescence, target validation, and transactional restore requirements. Database dumps do not include media files; protect both separately.
+
+Task UI exposes cooperative Stop, not force Kill. Stop requests cancellation at worker checkpoints; it does not promise immediate interruption of blocking work. Interrupted Procrastinate jobs can be retried after worker loss, so external download effects remain at-least-once. Review restored pending jobs before restarting workers after restore.
+
 ## Channel rolling window
 
 Set optional channel override `channel_overwrites.rolling_window_size` to a
