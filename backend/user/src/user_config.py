@@ -1,12 +1,13 @@
 """
 Functionality:
-- read and write user config backed by ES
+- read and write user config backed by PostgreSQL
 - encapsulate persistence of user properties
 """
 
 from typing import TypedDict
 
-from common.src.es_connect import ElasticWrap
+from django.db import transaction
+from user.models import Account, UserSettings
 
 
 class UserConfigType(TypedDict, total=False):
@@ -61,17 +62,13 @@ class UserConfig:
 
     def __init__(self, user_id: str):
         self._user_id: str = user_id
-        self._config: UserConfigType = self.get_config()
+        self._config: UserConfigType = dict(self._DEFAULT_USER_SETTINGS)
+        self._config = self.get_config()
 
-    @property
-    def es_url(self) -> str:
-        """es URL"""
-        return f"ta_config/_doc/user_{self._user_id}"
-
-    @property
-    def es_update_url(self) -> str:
-        """es update URL"""
-        return f"ta_config/_update/user_{self._user_id}"
+    def _settings(self) -> UserSettings:
+        account = Account.objects.get(pk=self._user_id)
+        settings_row, _ = UserSettings.objects.get_or_create(account=account)
+        return settings_row
 
     def get_value(self, key: str):
         """Get the given key from the users configuration
@@ -81,45 +78,53 @@ class UserConfig:
 
         return self._config.get(key)
 
+    @transaction.atomic
     def set_value(self, key: str, value: str | bool | int):
-        """Set or replace a configuration value for the user"""
-        data = {"doc": {"config": {key: value}}}
-        response, status = ElasticWrap(self.es_update_url).post(data)
-        if status < 200 or status > 299:
-            raise ValueError(f"Failed storing user value {status}: {response}")
-
+        """Set one value without losing concurrent preference updates."""
+        self._settings()
+        settings_row = UserSettings.objects.select_for_update().get(
+            account_id=self._user_id
+        )
+        settings_row.values[key] = value
+        settings_row.save(update_fields=["values"])
+        self._config[key] = value
         print(f"User {self._user_id} value '{key}' change: to {value}")
 
+    @transaction.atomic
     def get_config(self) -> UserConfigType:
-        """get config from ES or load from the application defaults"""
+        """Load PostgreSQL preferences or application defaults."""
         if not self._user_id:
             raise ValueError("no user_id passed")
 
-        response, status = ElasticWrap(self.es_url).get(print_error=False)
-        if status == 404:
-            self.sync_defaults()
-            config = self._DEFAULT_USER_SETTINGS
-        else:
-            config = self.sync_new_defaults(response["_source"]["config"])
+        self._settings()
+        settings_row = UserSettings.objects.select_for_update().get(
+            account_id=self._user_id
+        )
+        if not settings_row.values:
+            settings_row.values = dict(self._DEFAULT_USER_SETTINGS)
+            settings_row.save(update_fields=["values"])
+        return self.sync_new_defaults(settings_row.values)
 
-        return config
-
+    @transaction.atomic
     def update_config(self, to_update: dict) -> None:
-        """update config object"""
-        data = {"doc": {"config": to_update}}
-        response, status = ElasticWrap(self.es_update_url).post(data)
-        if status < 200 or status > 299:
-            raise ValueError(f"Failed storing user value {status}: {response}")
+        """Merge preferences while holding row lock."""
+        self._settings()
+        settings_row = UserSettings.objects.select_for_update().get(
+            account_id=self._user_id
+        )
+        settings_row.values.update(to_update)
+        settings_row.save(update_fields=["values"])
+        self._config.update(to_update)
 
         for key, value in to_update.items():
             print(f"User {self._user_id} value '{key}' change: to {value}")
 
     def sync_defaults(self):
         """set initial defaults on 404"""
-        response, _ = ElasticWrap(self.es_url).post(
-            {"config": self._DEFAULT_USER_SETTINGS}
-        )
-        print(f"set default config for user {self._user_id}: {response}")
+        settings_row = self._settings()
+        settings_row.values = dict(self._DEFAULT_USER_SETTINGS)
+        settings_row.save(update_fields=["values"])
+        print(f"set default config for user {self._user_id}")
 
     def sync_new_defaults(self, config):
         """sync new defaults"""

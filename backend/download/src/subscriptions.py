@@ -202,7 +202,7 @@ class SubscriptionHandler:
         YoutubeChannel(channel_id).change_subscribe(new_subscribe_state=True)
 
     def _notify(self, idx, item, total):
-        """send notification message to redis"""
+        """send subscription progress notification"""
         subscribe_type = item["type"].title()
         message_lines = [
             f"Subscribe to {subscribe_type}",

@@ -6,16 +6,25 @@ functionality:
 import math
 
 from appsettings.src.config import AppConfig
-from common.src.es_connect import ElasticWrap
+from channel.models import Channel
+from common.src.domain import (
+    channel_data,
+    playlist_data,
+    save_channel,
+    save_playlist,
+    save_video,
+    video_data,
+)
 from download.src.yt_dlp_base import YtWrap
+from playlist.models import Playlist
 from rest_framework.exceptions import ValidationError
 from user.src.user_config import UserConfig
+from video.models import Video
 
 
 class YouTubeItem:
     """base class for youtube"""
 
-    es_path = False
     index_name = ""
     yt_base = ""
     yt_obs: dict[str, bool | str] = {
@@ -25,7 +34,21 @@ class YouTubeItem:
 
     def __init__(self, youtube_id):
         self.youtube_id = youtube_id
-        self.es_path = f"{self.index_name}/_doc/{youtube_id}"
+        self.model = {
+            "ta_channel": Channel,
+            "ta_video": Video,
+            "ta_playlist": Playlist,
+        }[self.index_name]
+        self.to_data = {
+            "ta_channel": channel_data,
+            "ta_video": video_data,
+            "ta_playlist": playlist_data,
+        }[self.index_name]
+        self.save_data = {
+            "ta_channel": save_channel,
+            "ta_video": save_video,
+            "ta_playlist": save_playlist,
+        }[self.index_name]
         self.config = AppConfig().config
         self.error = None
         self.youtube_meta = False
@@ -54,35 +77,24 @@ class YouTubeItem:
             obs_request, self.config
         ).extract(url)
 
-    def get_from_es(self, print_error: bool = True) -> None:
-        """get indexed data from elastic search"""
-        print(f"{self.youtube_id}: get metadata from es")
-        resp, _ = ElasticWrap(f"{self.es_path}").get(print_error=print_error)
-        source = resp.get("_source")
-        self.json_data = source
+    def get_from_db(self, print_error: bool = True) -> None:
+        """Load domain object as existing wire shape."""
+        obj = self.model.objects.filter(pk=self.youtube_id).first()
+        self.json_data = self.to_data(obj) if obj else False
 
-    def upload_to_es(self):
-        """add json_data to elastic"""
-        _, _ = ElasticWrap(self.es_path).put(self.json_data, refresh=True)
+    def save_to_db(self):
+        """Persist current wire data through domain conversion helper."""
+        self.save_data(self.json_data)
 
     def deactivate(self):
         """deactivate document in es"""
         print(f"{self.youtube_id}: deactivate document")
-        key_match = {
-            "ta_video": "active",
-            "ta_channel": "channel_active",
-            "ta_playlist": "playlist_active",
-        }
-        path = f"{self.index_name}/_update/{self.youtube_id}?refresh=true"
-        data = {
-            "script": f"ctx._source.{key_match.get(self.index_name)} = false"
-        }
-        _, _ = ElasticWrap(path).post(data)
+        self.model.objects.filter(pk=self.youtube_id).update(active=False)
 
-    def del_in_es(self):
-        """delete item from elastic search"""
-        print(f"{self.youtube_id}: delete from es")
-        _, _ = ElasticWrap(self.es_path).delete(refresh=True)
+    def delete_from_db(self):
+        """Delete item and dependent rows."""
+        print(f"{self.youtube_id}: delete from db")
+        self.model.objects.filter(pk=self.youtube_id).delete()
 
 
 class Pagination:

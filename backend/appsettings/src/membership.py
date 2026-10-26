@@ -8,14 +8,14 @@ from os import environ
 import requests
 from appsettings.src.config import AppConfig
 from common.src.helper import get_channels
-from common.src.ta_redis import RedisArchivist
+from common.src.runtime import RuntimeStore
 
 
 class Membership:
     """membership"""
 
     BASE_URL = environ.get("MB_URL", "https://members.tubearchivist.com")
-    REDIS_KEY = "MB:KEY"
+    TOKEN_KEY = "MB:KEY"
 
     def __init__(self):
         self.config = AppConfig().config
@@ -31,7 +31,7 @@ class Membership:
 
     def _get_headers(self):
         """get headers with api key"""
-        token = RedisArchivist().get_message_dict(self.REDIS_KEY)
+        token = RuntimeStore().get_message_dict(self.TOKEN_KEY)
         if not token:
             raise ValueError("expected MB_API_KEY")
 

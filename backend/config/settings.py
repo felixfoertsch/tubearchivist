@@ -11,12 +11,12 @@ https://docs.djangoproject.com/en/3.2/ref/settings/
 """
 
 import hashlib
-from os import environ, path
+from os import environ
 from pathlib import Path
+from time import time
 
 from common.src.env_settings import EnvironmentSettings
 from common.src.helper import ta_host_parser
-from common.src.ta_redis import RedisArchivist
 from corsheaders.defaults import default_headers
 
 try:
@@ -48,7 +48,7 @@ CORS_ALLOWED_ORIGINS = CSRF_TRUSTED_ORIGINS
 # Application definition
 
 INSTALLED_APPS = [
-    "django_celery_beat",
+    "procrastinate.contrib.django",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "django.contrib.staticfiles",
     "django.contrib.humanize",
+    "django.contrib.postgres",
     "rest_framework",
     "rest_framework.authtoken",
     "drf_spectacular",
@@ -105,14 +106,16 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 # Database
-# https://docs.djangoproject.com/en/3.2/ref/settings/#databases
-
-CACHE_DIR = EnvironmentSettings.CACHE_DIR
-DB_PATH = path.join(CACHE_DIR, "db.sqlite3")
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": DB_PATH,
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": EnvironmentSettings.POSTGRES_DB,
+        "USER": EnvironmentSettings.POSTGRES_USER,
+        "PASSWORD": EnvironmentSettings.POSTGRES_PASSWORD,
+        "HOST": EnvironmentSettings.POSTGRES_HOST,
+        "PORT": EnvironmentSettings.POSTGRES_PORT,
+        "CONN_MAX_AGE": 60,
+        "OPTIONS": {"connect_timeout": 3},
     }
 }
 
@@ -217,15 +220,18 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
 ]
 CORS_EXPOSE_HEADERS = ["X-Start-Timestamp"]
 
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "tubearchivist-process-cache",
+    }
+}
+
 
 # TA application settings
 TA_UPSTREAM = "https://github.com/tubearchivist/tubearchivist"
 TA_VERSION = "v0.6.0-unstable"
-try:
-    TA_START = RedisArchivist().get_message_str("STARTTIMESTAMP")
-except ValueError:
-    # fails in unittests bootstrap
-    pass
+TA_START = str(int(time() // 10 * 10))
 
 # API
 REST_FRAMEWORK = {

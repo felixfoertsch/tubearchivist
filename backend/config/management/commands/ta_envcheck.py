@@ -56,17 +56,14 @@ TOPIC = """
 EXPECTED_ENV_VARS = [
     "TA_USERNAME",
     "TA_PASSWORD",
-    "ELASTIC_PASSWORD",
-    "ES_URL",
+    "POSTGRES_PASSWORD",
     "TA_HOST",
 ]
 FILE_FALLBACK = [
-    "ELASTIC_PASSWORD",
+    "POSTGRES_PASSWORD",
     "TA_PASSWORD",
 ]
 UNEXPECTED_ENV_VARS = {
-    "REDIS_HOST": "Has been replaced with 'REDIS_CON' connection string",
-    "REDIS_PORT": "Has been consolidated in 'REDIS_CON' connection string",
     "ENABLE_CAST": "That is now a toggle in setting and DISABLE_STATIC_AUTH",
     "TA_BACKEND_PORT": "That is removed, only TA_PORT is needed",
     "HOST_UID": "Removed, start container under dedicated user instead",
@@ -88,7 +85,7 @@ class Command(BaseCommand):
         self._additional_auth_vars_expectations()
         self._expected_vars()
         self._unexpected_vars()
-        self._elastic_user_overwrite()
+        self._postgres_configuration()
         self._create_superuser()
 
     def _additional_auth_vars_expectations(self):
@@ -174,11 +171,15 @@ class Command(BaseCommand):
         message = "    ✓ no unexpected env vars found"
         self.stdout.write(self.style.SUCCESS(message))
 
-    def _elastic_user_overwrite(self):
-        """check for ELASTIC_USER overwrite"""
-        self.stdout.write("[3] check ES user overwrite")
-        env = EnvironmentSettings.ES_USER
-        self.stdout.write(self.style.SUCCESS(f"    ✓ ES user is set to {env}"))
+    def _postgres_configuration(self):
+        """Show configured PostgreSQL endpoint without exposing credentials."""
+        self.stdout.write("[3] check PostgreSQL configuration")
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"    ✓ PostgreSQL host {EnvironmentSettings.POSTGRES_HOST}:"
+                f"{EnvironmentSettings.POSTGRES_PORT}"
+            )
+        )
 
     def _create_superuser(self):
         """create superuser if not exist"""

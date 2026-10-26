@@ -52,3 +52,13 @@ class Account(AbstractBaseUser, PermissionsMixin):
 
     USERNAME_FIELD = "name"
     REQUIRED_FIELDS = ["password"]
+
+
+class UserSettings(models.Model):
+    account = models.OneToOneField(
+        Account,
+        primary_key=True,
+        on_delete=models.CASCADE,
+        related_name="settings",
+    )
+    values = models.JSONField(default=dict)

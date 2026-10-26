@@ -1,7 +1,7 @@
 """
 Functionality:
 - read and write config
-- load config variables into redis
+- persist application configuration in PostgreSQL
 """
 
 from random import randint
@@ -9,10 +9,10 @@ from time import sleep
 from typing import Literal, TypedDict
 
 import requests
-from appsettings.src.snapshot import ElasticSnapshot
-from common.src.es_connect import ElasticWrap
-from common.src.ta_redis import RedisArchivist
+from appsettings.models import ApplicationSettings
+from common.src.runtime import RuntimeStore
 from django.conf import settings
+from django.db import transaction
 
 
 class SubscriptionsConfigType(TypedDict):
@@ -66,8 +66,6 @@ class AppConfigType(TypedDict):
 class AppConfig:
     """handle application variables"""
 
-    ES_PATH = "ta_config/_doc/appsettings"
-    ES_UPDATE_PATH = "ta_config/_update/appsettings"
     CONFIG_DEFAULTS: AppConfigType = {
         "subscriptions": {
             "channel_size": 50,
@@ -97,7 +95,7 @@ class AppConfig:
             "integrate_sponsorblock": False,
         },
         "application": {
-            "enable_snapshot": True,
+            "enable_snapshot": False,
             "enable_cast": False,
         },
     }
@@ -106,16 +104,17 @@ class AppConfig:
         self.config = self.get_config()
 
     def get_config(self) -> AppConfigType:
-        """get config from ES"""
-        response, status_code = ElasticWrap(self.ES_PATH).get()
-        if not status_code == 200:
-            raise ValueError(f"no config found at {self.ES_PATH}")
+        """get config from PostgreSQL, creating defaults on first access"""
+        settings_row, _ = ApplicationSettings.objects.get_or_create(
+            pk=1, defaults={"sections": self.CONFIG_DEFAULTS}
+        )
+        return settings_row.sections
 
-        return response["_source"]
-
+    @transaction.atomic
     def update_config(self, data: dict) -> AppConfigType:
-        """update single config value"""
-        new_config = self.config.copy()
+        """Merge updates without overwriting concurrent settings changes."""
+        row = ApplicationSettings.objects.select_for_update().get(pk=1)
+        new_config = row.sections
         for key, value in data.items():
             if (
                 isinstance(value, dict)
@@ -126,19 +125,12 @@ class AppConfig:
             else:
                 new_config[key] = value
 
-        response, status_code = ElasticWrap(self.ES_PATH).post(new_config)
-        if not status_code == 200:
-            print(response)
+        row.sections = new_config
+        row.save(update_fields=["sections"])
 
         self.config = new_config
 
         return new_config
-
-    def post_process_updated(self, data: dict) -> None:
-        """apply hooks for some config keys"""
-        for config_value, updated_value in data:
-            if config_value == "application.enable_snapshot" and updated_value:
-                ElasticSnapshot().setup()
 
     @staticmethod
     def _fail_message(message_line):
@@ -152,14 +144,17 @@ class AppConfig:
             "messages": [message_line],
             "id": "0000",
         }
-        RedisArchivist().set_message(key, message=message, expire=True)
+        RuntimeStore().set_message(key, message=message, expire=True)
 
     def sync_defaults(self):
         """sync defaults at startup, needs to be called with __new__"""
-        return ElasticWrap(self.ES_PATH).post(self.CONFIG_DEFAULTS)
+        settings_row, _ = ApplicationSettings.objects.get_or_create(
+            pk=1, defaults={"sections": self.CONFIG_DEFAULTS}
+        )
+        return settings_row.sections
 
     def add_new_defaults(self) -> list[str]:
-        """add new default config values to ES, called at startup"""
+        """Add newly introduced settings at startup."""
         updated = []
         for key, value in self.CONFIG_DEFAULTS.items():
             if key not in self.config:
@@ -177,8 +172,11 @@ class AppConfig:
 
         return updated
 
+    @transaction.atomic
     def clear_old_keys(self) -> list[str]:
-        """clear old unused keys"""
+        """Remove obsolete keys without overwriting concurrent updates."""
+        row = ApplicationSettings.objects.select_for_update().get(pk=1)
+        self.config = row.sections
         cleared = []
         for key in list(self.config.keys()):
             if key not in self.CONFIG_DEFAULTS:
@@ -187,9 +185,7 @@ class AppConfig:
                 cleared.append(str({key: value}))
                 continue
 
-            expected_keys = set(
-                self.CONFIG_DEFAULTS[key].keys()  # type: ignore
-            )
+            expected_keys = set(self.CONFIG_DEFAULTS[key])  # type: ignore
             is_keys = set(list(self.config[key].keys()))
 
             for to_delete in is_keys - expected_keys:
@@ -199,9 +195,8 @@ class AppConfig:
         if not cleared:
             return []
 
-        response, status_code = ElasticWrap(self.ES_PATH).post(self.config)
-        if not status_code == 200:
-            print(response)
+        row.sections = self.config
+        row.save(update_fields=["sections"])
 
         return cleared
 
@@ -229,7 +224,7 @@ class ReleaseVersion:
                 "version": new_version,
                 "is_breaking": self.is_breaking,
             }
-            RedisArchivist().set_message(self.NEW_KEY, message)
+            RuntimeStore().set_message(self.NEW_KEY, message)
             print(f"[{self.local_version}]: found new version {new_version}")
 
     def get_local_version(self) -> str:
@@ -271,12 +266,12 @@ class ReleaseVersion:
         message_parsed = self._parse_version(message.get("version"))
 
         if local_parsed >= message_parsed:
-            RedisArchivist().del_message(self.NEW_KEY)
+            RuntimeStore().del_message(self.NEW_KEY)
             return settings.TA_VERSION
 
         return False
 
     def get_update(self) -> dict | None:
         """return new version dict if available"""
-        message = RedisArchivist().get_message_dict(self.NEW_KEY)
+        message = RuntimeStore().get_message_dict(self.NEW_KEY)
         return message or None

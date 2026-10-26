@@ -1,17 +1,13 @@
-"""
-Functionality:
-- Download comments
-- Index comments in ES
-- Retrieve comments from ES
-"""
+"""Download, store, and retrieve video comments."""
 
 from datetime import datetime
 
 from appsettings.src.config import AppConfig
-from common.src.es_connect import ElasticWrap
 from common.src.helper import rand_sleep
-from common.src.ta_redis import RedisQueue
+from common.src.runtime import RuntimeQueue
+from django.db import transaction
 from download.src.yt_dlp_base import YtWrap
+from video.models import Video, VideoComments
 
 
 class Comments:
@@ -19,14 +15,13 @@ class Comments:
 
     def __init__(self, youtube_id, config=False):
         self.youtube_id = youtube_id
-        self.es_path = f"ta_comment/_doc/{youtube_id}"
         self.json_data = False
         self.config = config
         self.is_activated = False
         self.comments_format = False
 
     def build_json(self, upload: bool = False):
-        """build json document for es"""
+        """Build the comment representation."""
         print(f"{self.youtube_id}: get comments")
         self.check_config()
         if not self.is_activated:
@@ -142,30 +137,46 @@ class Comments:
 
         return cleaned_comment
 
+    @transaction.atomic
     def upload_comments(self):
-        """upload comments to es"""
+        """Persist comments and matching count in one transaction."""
         print(f"{self.youtube_id}: upload comments")
-        _, _ = ElasticWrap(self.es_path).put(self.json_data)
-
-        vid_path = f"ta_video/_update/{self.youtube_id}"
-        data = {
-            "doc": {"comment_count": len(self.json_data["comment_comments"])}
-        }
-        _, _ = ElasticWrap(vid_path).post(data=data)
+        video = (
+            Video.objects.select_for_update()
+            .filter(pk=self.youtube_id)
+            .first()
+        )
+        VideoComments.objects.update_or_create(
+            video_id=self.youtube_id,
+            defaults={
+                "comments": self.json_data["comment_comments"],
+                "last_refresh": self.json_data["comment_last_refresh"],
+            },
+        )
+        if video:
+            video.metadata["comment_count"] = len(
+                self.json_data["comment_comments"]
+            )
+            video.save(update_fields=["metadata"])
 
     def delete_comments(self):
-        """delete comments from es"""
+        """Delete saved comments."""
         print(f"{self.youtube_id}: delete comments")
-        _, _ = ElasticWrap(self.es_path).delete(refresh=True)
+        VideoComments.objects.filter(video_id=self.youtube_id).delete()
 
-    def get_es_comments(self):
-        """get comments from ES"""
-        response, statuscode = ElasticWrap(self.es_path).get()
-        if statuscode == 404:
+    def get_comments(self):
+        """Load saved comments."""
+        comments = VideoComments.objects.filter(
+            video_id=self.youtube_id
+        ).first()
+        if not comments:
             print(f"comments: not found {self.youtube_id}")
             return False
-
-        return response.get("_source")
+        return {
+            "youtube_id": self.youtube_id,
+            "comment_comments": comments.comments,
+            "comment_last_refresh": comments.last_refresh,
+        }
 
     def reindex_comments(self):
         """update comments from youtube"""
@@ -177,16 +188,9 @@ class Comments:
         if not self.json_data:
             return
 
-        es_comments = self.get_es_comments()
-
         if not self.comments_format:
             return
 
-        if not self.comments_format and es_comments["comment_comments"]:
-            # don't overwrite comments in es
-            return
-
-        self.delete_comments()
         self.upload_comments()
 
 
@@ -204,25 +208,27 @@ class CommentList:
         if not self.config["downloads"].get("comment_max"):
             return
 
-        RedisQueue(self.COMMENT_QUEUE).add_list(video_ids)
+        RuntimeQueue(self.COMMENT_QUEUE).add_list(video_ids)
 
     def index(self):
         """run comment index"""
-        queue = RedisQueue(self.COMMENT_QUEUE)
-        while True:
-            total = queue.max_score()
+        queue = RuntimeQueue(self.COMMENT_QUEUE)
+        while queue.length():
+            total = queue.length()
             youtube_id, idx = queue.get_next()
-            if not youtube_id or not idx or not total:
+            if not youtube_id:
                 break
-
-            if self.task:
-                self.notify(idx, total)
-
-            comment = Comments(youtube_id, config=self.config)
-            comment.build_json()
-            if comment.json_data:
-                comment.upload_comments()
-
+            if self.task and self.task.is_stopped():
+                queue.release(youtube_id)
+                break
+            with queue.keepalive(youtube_id):
+                if self.task:
+                    self.notify(idx, total)
+                comment = Comments(youtube_id, config=self.config)
+                comment.build_json()
+                if comment.json_data:
+                    comment.upload_comments()
+            queue.ack(youtube_id)
             rand_sleep(self.config)
 
     def notify(self, idx, total_videos):

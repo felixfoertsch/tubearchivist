@@ -6,8 +6,10 @@ from common.serializers import (
     AsyncTaskResponseSerializer,
     ErrorResponseSerializer,
 )
+from common.src.domain import playlist_data
 from common.views_base import AdminWriteOnly, ApiBaseView
 from drf_spectacular.utils import OpenApiResponse, extend_schema
+from playlist.models import Playlist
 from playlist.serializers import (
     PlaylistBulkAddSerializer,
     PlaylistCustomPostSerializer,
@@ -21,11 +23,13 @@ from playlist.serializers import (
 from playlist.src.index import YoutubePlaylist
 from playlist.src.query_building import QueryBuilder
 from rest_framework.response import Response
-from task.tasks import subscribe_to
+from task.jobs import enqueue_task
 from user.src.user_config import UserConfig
 
 
 class PlaylistApiListView(ApiBaseView):
+    model = Playlist
+    to_data = staticmethod(playlist_data)
     """resolves to /api/playlist/
     GET: returns list of indexed playlists
     params:
@@ -35,7 +39,6 @@ class PlaylistApiListView(ApiBaseView):
     POST: change subscribe state
     """
 
-    search_base = "ta_playlist/_search/"
     permission_classes = [AdminWriteOnly]
 
     @extend_schema(
@@ -60,7 +63,7 @@ class PlaylistApiListView(ApiBaseView):
             error = ErrorResponseSerializer({"error": str(err)})
             return Response(error.data, status=400)
 
-        self.data = data
+        self._queryset = data
         self.get_document_list(request)
 
         response_serializer = PlaylistListSerializer(self.response)
@@ -88,11 +91,14 @@ class PlaylistApiListView(ApiBaseView):
             return Response(error.data, status=400)
 
         url_str = " ".join(pending)
-        task = subscribe_to.delay(url_str, expected_type="playlist")
+        task_id = str(
+            enqueue_task("subscribe_to", url_str, expected_type="playlist")
+        )
 
         message = {
             "message": "playlist subscribe task started",
-            "task_id": task.id,
+            "task_id": task_id,
+            "status": "PENDING",
         }
         serializer = AsyncTaskResponseSerializer(message)
 
@@ -100,11 +106,12 @@ class PlaylistApiListView(ApiBaseView):
 
 
 class PlaylistCustomApiListView(ApiBaseView):
+    model = Playlist
+    to_data = staticmethod(playlist_data)
     """resolves to /api/playlist/custom/
     POST: Create new custom playlist
     """
 
-    search_base = "ta_playlist/_search/"
     permission_classes = [AdminWriteOnly]
 
     @extend_schema(
@@ -133,11 +140,12 @@ class PlaylistCustomApiListView(ApiBaseView):
 
 
 class PlaylistCustomApiView(ApiBaseView):
+    model = Playlist
+    to_data = staticmethod(playlist_data)
     """resolves to /api/playlist/custom/<playlist_id>/
     POST: modify custom playlist
     """
 
-    search_base = "ta_playlist/_doc/"
     permission_classes = [AdminWriteOnly]
 
     @extend_schema(
@@ -191,11 +199,12 @@ class PlaylistCustomApiView(ApiBaseView):
 
 
 class PlaylistApiView(ApiBaseView):
+    model = Playlist
+    to_data = staticmethod(playlist_data)
     """resolves to /api/playlist/<playlist_id>/
     GET: returns metadata dict of playlist
     """
 
-    search_base = "ta_playlist/_doc/"
     permission_classes = [AdminWriteOnly]
     valid_custom_actions = ["create", "remove", "up", "down", "top", "bottom"]
 

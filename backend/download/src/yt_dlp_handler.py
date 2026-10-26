@@ -13,19 +13,21 @@ from datetime import datetime
 
 from appsettings.src.config import AppConfig
 from channel.src.index import YoutubeChannel
+from common.src.domain import download_data, video_data
 from common.src.env_settings import EnvironmentSettings
-from common.src.es_connect import ElasticWrap, IndexPaginate
 from common.src.helper import (
     get_channel_overwrites,
     get_playlists,
     ignore_filelist,
     rand_sleep,
 )
-from common.src.ta_redis import RedisQueue
+from common.src.runtime import RuntimeQueue
+from download.models import Download
 from download.src.queue import delete_and_ignore
-from download.src.queue_interact import PendingInteract
 from download.src.yt_dlp_base import YtWrap
+from playlist.models import PlaylistEntry
 from playlist.src.index import YoutubePlaylist
+from video.models import Video
 from video.src.comments import CommentList
 from video.src.constants import VideoTypeEnum
 from video.src.index import YoutubeVideo, index_new_video
@@ -54,63 +56,82 @@ class VideoDownloader(DownloaderBase):
     def __init__(self, task=False):
         super().__init__(task)
         self.obs = False
+        self.pending_queue = RuntimeQueue("download:pending")
+        self.active_lease = None
         self._build_obs()
 
     def run_queue(self, auto_only=False) -> tuple[int, int]:
-        """setup download queue in redis loop until no more items"""
+        """Process leased downloads until no queue items remain."""
         downloaded = 0
         failed = 0
+        self._clear_retry_errors()
         while True:
             video_data = self._get_next(auto_only)
-            if self.task.is_stopped() or not video_data:
-                self._reset_auto()
+            if not video_data:
                 break
-
-            if self._auto_ignore(video_data):
-                continue
-
-            if downloaded > 0:
-                rand_sleep(self.config)
-
             youtube_id = video_data["youtube_id"]
-            channel_id = video_data["channel_id"]
-            print(f"{youtube_id}: Downloading video")
-            self._notify(video_data, "Validate download format")
-
-            success = self._dl_single_vid(youtube_id, channel_id)
-            if not success:
-                failed += 1
-                continue
-
-            self._notify(video_data, "Add video metadata to index", progress=1)
-            video_type = VideoTypeEnum(video_data["vid_type"])
-            vid_dict = index_new_video(youtube_id, video_type=video_type)
-            RedisQueue(self.CHANNEL_QUEUE).add(channel_id)
-            RedisQueue(self.VIDEO_QUEUE).add(youtube_id)
-
-            self._notify(video_data, "Move downloaded file to archive")
-            self.move_to_archive(vid_dict)
-            if self.config["downloads"].get("add_metadata") == "simple":
-                video = YoutubeVideo(youtube_id)
-                video.json_data = vid_dict
-                video.embed_metadata(from_download=True)
-            self._delete_from_pending(youtube_id)
-            downloaded += 1
+            stopped = bool(self.task and self.task.is_stopped())
+            with self.pending_queue.keepalive(youtube_id):
+                if stopped:
+                    success, ignored = False, False
+                elif self._auto_ignore(video_data):
+                    success, ignored = False, True
+                else:
+                    if downloaded > 0:
+                        rand_sleep(self.config)
+                    success = self._process_queued_video(video_data)
+                    ignored = False
+                    failed += not success
+            if stopped or not success and not ignored:
+                self.pending_queue.release(youtube_id)
+                self.active_lease = None
+                break
+            self.pending_queue.ack(youtube_id)
+            self.active_lease = None
+            downloaded += success
 
         # Failed or stopped batches cannot grant destructive reconciliation.
-        if not failed and not self.task.is_stopped() and downloaded:
+        if (
+            not failed
+            and not (self.task and self.task.is_stopped())
+            and downloaded
+        ):
             from download.src.rolling_window import reconcile_windows
 
             reconcile_windows(self.config, self.task)
-        # post processing
-        DownloadPostProcess(self.task).run()
+        # Postprocessing can prune media; run only after a clean queue pass.
+        if not failed and not (self.task and self.task.is_stopped()):
+            DownloadPostProcess(self.task).run()
 
         return downloaded, failed
+
+    def _process_queued_video(self, video_data) -> bool:
+        """Download, index, and archive one leased queue item."""
+        youtube_id = video_data["youtube_id"]
+        channel_id = video_data["channel_id"]
+        print(f"{youtube_id}: Downloading video")
+        self._notify(video_data, "Validate download format")
+        if not self._dl_single_vid(youtube_id, channel_id):
+            return False
+
+        self._notify(video_data, "Add video metadata to index", progress=1)
+        video_type = VideoTypeEnum(video_data["vid_type"])
+        vid_dict = index_new_video(youtube_id, video_type=video_type)
+        RuntimeQueue(self.CHANNEL_QUEUE).add(channel_id)
+        RuntimeQueue(self.VIDEO_QUEUE).add(youtube_id)
+        self._notify(video_data, "Move downloaded file to archive")
+        self.move_to_archive(vid_dict)
+        if self.config["downloads"].get("add_metadata") == "simple":
+            video = YoutubeVideo(youtube_id)
+            video.json_data = vid_dict
+            video.embed_metadata(from_download=True)
+        self._delete_from_pending(youtube_id)
+        return True
 
     def _auto_ignore(self, video_data) -> bool:
         """check current channel settings before downloading a queued video"""
         channel = YoutubeChannel(video_data["channel_id"])
-        channel.get_from_es()
+        channel.get_from_db()
         if not channel.json_data:
             return False
 
@@ -127,7 +148,7 @@ class VideoDownloader(DownloaderBase):
             return False
 
         youtube_id = video_data["youtube_id"]
-        PendingInteract(youtube_id=youtube_id, status="ignore").update_status()
+        Download.objects.filter(pk=youtube_id).update(status="ignore")
         self._notify(video_data, "Auto-ignored by channel title filter")
         print(f"{youtube_id}: auto-ignored by channel title filter")
         return True
@@ -145,30 +166,47 @@ class VideoDownloader(DownloaderBase):
             youtube_id=video_data.get("youtube_id"),
         )
 
+    def _clear_retry_errors(self):
+        """Clear only errors recorded by earlier attempts of this task."""
+        retries = getattr(getattr(self.task, "request", None), "retries", 0)
+        task_id = getattr(getattr(self.task, "request", None), "id", None)
+        if not retries or not task_id:
+            return
+        errors = Download.objects.filter(
+            status="pending", metadata__retry_task_id=task_id
+        )
+        for item in errors:
+            item.metadata.pop("message", None)
+            item.metadata.pop("retry_task_id", None)
+            item.save(update_fields=["metadata"])
+
     def _get_next(self, auto_only):
-        """get next item in queue"""
-        must_list = [{"term": {"status": {"value": "pending"}}}]
-        must_not_list = [{"exists": {"field": "message"}}]
+        """Lease next pending item."""
+        eligible = Download.objects.filter(status="pending").exclude(
+            metadata__has_key="message"
+        )
         if auto_only:
-            must_list.append({"term": {"auto_start": {"value": True}}})
-
-        data = {
-            "size": 1,
-            "query": {"bool": {"must": must_list, "must_not": must_not_list}},
-            "sort": [
-                {"auto_start": {"order": "desc"}},
-                {"timestamp": {"order": "asc"}},
-            ],
-        }
-        path = "ta_download/_search"
-        response, _ = ElasticWrap(path).get(data=data)
-        if not response["hits"]["hits"]:
+            eligible = eligible.filter(metadata__auto_start=True)
+        item_id, _ = self.pending_queue.get_next(
+            eligible=eligible.values("pk")
+        )
+        if not item_id:
             return False
-
-        return response["hits"]["hits"][0]["_source"]
+        item = eligible.filter(pk=item_id).first()
+        if not item:
+            self.pending_queue.release(item_id)
+            return False
+        self.active_lease = item_id
+        return download_data(item)
 
     def _progress_hook(self, response):
-        """process the progress_hooks from yt_dlp"""
+        """Process progress and honor task cancellation."""
+        if self.task and self.task.is_stopped():
+            raise InterruptedError("Download task stopped")
+        if getattr(
+            self, "active_lease", None
+        ) and not self.pending_queue.renew(self.active_lease):
+            raise InterruptedError("Download queue lease expired")
         progress = False
         try:
             size = response.get("_total_bytes_str")
@@ -256,7 +294,11 @@ class VideoDownloader(DownloaderBase):
 
         success, message = YtWrap(obs, self.config).download(youtube_id)
         if not success:
-            self._handle_error(youtube_id, message)
+            self._handle_error(
+                youtube_id,
+                message,
+                getattr(getattr(self.task, "request", None), "id", None),
+            )
 
         if self.obs["writethumbnail"]:
             # webp files don't get cleaned up automatically
@@ -269,10 +311,14 @@ class VideoDownloader(DownloaderBase):
         return success
 
     @staticmethod
-    def _handle_error(youtube_id, message):
-        """store error message"""
-        data = {"doc": {"message": message}}
-        _, _ = ElasticWrap(f"ta_download/_update/{youtube_id}").post(data=data)
+    def _handle_error(youtube_id, message, task_id=None):
+        """Store error message and task identity for safe retries."""
+        item = Download.objects.filter(pk=youtube_id).first()
+        if item:
+            item.metadata["message"] = message
+            if task_id:
+                item.metadata["retry_task_id"] = task_id
+            item.save(update_fields=["metadata"])
 
     def move_to_archive(self, vid_dict):
         """move downloaded video from cache to archive"""
@@ -292,21 +338,15 @@ class VideoDownloader(DownloaderBase):
     @staticmethod
     def _delete_from_pending(youtube_id):
         """delete downloaded video from pending index if its there"""
-        path = f"ta_download/_doc/{youtube_id}?refresh=true"
-        _, _ = ElasticWrap(path).delete()
+        Download.objects.filter(pk=youtube_id).delete()
 
     def _reset_auto(self):
         """reset autostart to defaults after queue stop"""
-        path = "ta_download/_update_by_query"
-        data = {
-            "query": {"term": {"auto_start": {"value": True}}},
-            "script": {
-                "source": "ctx._source.auto_start = false",
-                "lang": "painless",
-            },
-        }
-        response, _ = ElasticWrap(path).post(data=data)
-        updated = response.get("updated")
+        updated = 0
+        for item in Download.objects.filter(metadata__auto_start=True):
+            item.metadata["auto_start"] = False
+            item.save(update_fields=["metadata"])
+            updated += 1
         if updated:
             print(f"[download] reset auto start on {updated} videos.")
 
@@ -323,7 +363,7 @@ class DownloadPostProcess(DownloaderBase):
         self.get_comments()
         self.embed_metadata()
 
-        RedisQueue(self.VIDEO_QUEUE).clear()
+        RuntimeQueue(self.VIDEO_QUEUE).clear()
 
     def auto_delete_all(self):
         """handle auto delete"""
@@ -332,23 +372,9 @@ class DownloadPostProcess(DownloaderBase):
             return
 
         print(f"auto delete older than {autodelete_days} days")
-        now_lte = str(self.now - autodelete_days * 24 * 60 * 60)
-        channel_overwrite = "channel.channel_overwrites.autodelete_days"
-        data = {
-            "query": {
-                "bool": {
-                    "must": [
-                        {"range": {"player.watched_date": {"lte": now_lte}}},
-                        {"term": {"player.watched": True}},
-                    ],
-                    "must_not": [
-                        {"exists": {"field": channel_overwrite}},
-                    ],
-                }
-            },
-            "sort": [{"player.watched_date": {"order": "asc"}}],
-        }
-        self._auto_delete_watched(data)
+        self._auto_delete_watched(
+            cutoff=self.now - autodelete_days * 86400, global_only=True
+        )
 
     def auto_delete_overwrites(self):
         """handle per channel auto delete from overwrites"""
@@ -359,24 +385,25 @@ class DownloadPostProcess(DownloaderBase):
                     continue
 
                 print(f"{channel_id}: delete older than {autodelete_days}d")
-                now_lte = str(self.now - autodelete_days * 24 * 60 * 60)
-                must_list = [
-                    {"range": {"player.watched_date": {"lte": now_lte}}},
-                    {"term": {"channel.channel_id": {"value": channel_id}}},
-                    {"term": {"player.watched": True}},
-                ]
-                data = {
-                    "query": {"bool": {"must": must_list}},
-                    "sort": [{"player.watched_date": {"order": "desc"}}],
-                }
-                self._auto_delete_watched(data)
+                self._auto_delete_watched(
+                    channel_id=channel_id,
+                    cutoff=self.now - autodelete_days * 86400,
+                )
 
-    def _auto_delete_watched(self, data) -> None:
-        """delete watched videos after x days"""
-        to_delete = IndexPaginate("ta_video", data).get_results()
-        if not to_delete:
-            return
-
+    def _auto_delete_watched(
+        self, cutoff, channel_id=None, global_only=False
+    ) -> None:
+        """Delete watched videos older than cutoff."""
+        query = Video.objects.filter(watched=True, watched_at__lte=cutoff)
+        if channel_id:
+            query = query.filter(channel_id=channel_id)
+        if global_only:
+            query = query.filter(
+                channel__overrides__autodelete_days__isnull=True
+            )
+        to_delete = [
+            video_data(video) for video in query.select_related("channel")
+        ]
         from download.src.rolling_window import owns_video
 
         delete_and_ignore(
@@ -391,19 +418,19 @@ class DownloadPostProcess(DownloaderBase):
         """match videos with playlists"""
         self.add_playlists_to_refresh()
 
-        queue = RedisQueue(self.PLAYLIST_QUEUE)
-        while True:
-            total = queue.max_score()
+        queue = RuntimeQueue(self.PLAYLIST_QUEUE)
+        while queue.length():
+            total = queue.length()
             playlist_id, idx = queue.get_next()
-            if not playlist_id or not idx or not total:
+            if not playlist_id:
                 break
 
             try:
-                playlist = YoutubePlaylist(playlist_id)
-                playlist.update_playlist(skip_on_empty=True)
-                if not playlist.json_data:
-                    raise ValueError("no json data extracted for playlist")
-
+                with queue.keepalive(playlist_id):
+                    playlist = YoutubePlaylist(playlist_id)
+                    playlist.update_playlist(skip_on_empty=True)
+                    if not playlist.json_data:
+                        raise ValueError("no json data extracted for playlist")
             except ValueError as err:
                 message = [
                     f"{playlist_id}: skip failed playlist import",
@@ -412,9 +439,9 @@ class DownloadPostProcess(DownloaderBase):
                 print(message)
                 if self.task:
                     self.task.send_progress(message)
-
                 continue
 
+            queue.ack(playlist_id)
             if not self.task:
                 continue
 
@@ -442,60 +469,60 @@ class DownloadPostProcess(DownloaderBase):
         """add subscribed playlists to refresh"""
         playlists = get_playlists(subscribed_only=True, source=["playlist_id"])
         to_add = [i["playlist_id"] for i in playlists]
-        RedisQueue(self.PLAYLIST_QUEUE).add_list(to_add)
+        RuntimeQueue(self.PLAYLIST_QUEUE).add_list(to_add)
 
     def _add_channel_playlists(self):
         """add playlists from channels to refresh"""
-        queue = RedisQueue(self.CHANNEL_QUEUE)
+        queue = RuntimeQueue(self.CHANNEL_QUEUE)
         while True:
             channel_id, _ = queue.get_next()
             if not channel_id:
                 break
 
-            channel = YoutubeChannel(channel_id)
-            channel.get_from_es()
-            if not channel.json_data:
-                print(f"{channel_id}: skip failed channel import")
-                continue
-
-            overwrites = channel.get_overwrites()
-            if overwrites.get("index_playlists"):
-                channel.get_all_playlists()
-                to_add = [i[0] for i in channel.all_playlists]
-                RedisQueue(self.PLAYLIST_QUEUE).add_list(to_add)
+            with queue.keepalive(channel_id):
+                channel = YoutubeChannel(channel_id)
+                channel.get_from_db()
+                if channel.json_data:
+                    overwrites = channel.get_overwrites()
+                    if overwrites.get("index_playlists"):
+                        channel.get_all_playlists()
+                        to_add = [i[0] for i in channel.all_playlists]
+                        RuntimeQueue(self.PLAYLIST_QUEUE).add_list(to_add)
+            queue.ack(channel_id)
 
     def _add_video_playlists(self):
         """add other playlists for quick sync"""
-        all_playlists = RedisQueue(self.PLAYLIST_QUEUE).get_all()
-        must_not = [{"terms": {"playlist_id": all_playlists}}]
-        video_ids = RedisQueue(self.VIDEO_QUEUE).get_all()
-        must = [{"terms": {"playlist_entries.youtube_id": video_ids}}]
-        data = {
-            "query": {"bool": {"must_not": must_not, "must": must}},
-            "_source": ["playlist_id"],
-        }
-        playlists = IndexPaginate("ta_playlist", data).get_results()
-        to_add = [i["playlist_id"] for i in playlists]
-        RedisQueue(self.PLAYLIST_QUICK).add_list(to_add)
+        queued = RuntimeQueue(self.PLAYLIST_QUEUE).get_all()
+        video_ids = RuntimeQueue(self.VIDEO_QUEUE).get_all()
+        to_add = list(
+            PlaylistEntry.objects.filter(video_id__in=video_ids)
+            .exclude(playlist_id__in=queued)
+            .values_list("playlist_id", flat=True)
+            .distinct()
+        )
+        RuntimeQueue(self.PLAYLIST_QUICK).add_list(to_add)
 
     def match_videos(self) -> None:
         """scan rest of indexed playlists to match videos"""
-        queue = RedisQueue(self.PLAYLIST_QUICK)
-        while True:
-            total = queue.max_score()
+        queue = RuntimeQueue(self.PLAYLIST_QUICK)
+        while queue.length():
+            total = queue.length()
             playlist_id, idx = queue.get_next()
-            if not playlist_id or not idx or not total:
+            if not playlist_id:
                 break
 
-            playlist = YoutubePlaylist(playlist_id)
-            playlist.get_from_es()
-            if not playlist.json_data:
-                print(f"{playlist_id}: skip failed playlist import")
-                continue
+            with queue.keepalive(playlist_id):
+                playlist = YoutubePlaylist(playlist_id)
+                playlist.get_from_db()
+                if not playlist.json_data:
+                    print(f"{playlist_id}: skip failed playlist import")
+                    queue.release(playlist_id)
+                    continue
 
-            playlist.add_vids_to_playlist()
-            playlist.remove_vids_from_playlist()
-            playlist.match_local()
+                playlist.add_vids_to_playlist()
+                playlist.remove_vids_from_playlist()
+                playlist.match_local()
+            queue.ack(playlist_id)
 
             if not self.task:
                 continue
@@ -509,7 +536,7 @@ class DownloadPostProcess(DownloaderBase):
 
     def get_comments(self):
         """get comments from youtube"""
-        video_queue = RedisQueue(self.VIDEO_QUEUE)
+        video_queue = RuntimeQueue(self.VIDEO_QUEUE)
         comment_list = CommentList(task=self.task)
         comment_list.add(video_ids=video_queue.get_all())
         comment_list.index()
@@ -519,12 +546,13 @@ class DownloadPostProcess(DownloaderBase):
         if self.config["downloads"].get("add_metadata") is not True:
             return
 
-        queue = RedisQueue(self.VIDEO_QUEUE)
-        total = queue.max_score()
+        queue = RuntimeQueue(self.VIDEO_QUEUE)
         video_ids = queue.get_all()
+        total = len(video_ids)
 
-        for idx, youtube_id in enumerate(video_ids):
+        for idx, youtube_id in enumerate(video_ids, start=1):
             YoutubeVideo(youtube_id).embed_metadata()
+            queue.ack(youtube_id)
 
             if not self.task:
                 continue

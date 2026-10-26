@@ -25,6 +25,11 @@ urlpatterns = [
         name="api-backup-list",
     ),
     path(
+        "backup/<str:filename>/download/",
+        views.BackupDownloadView.as_view(),
+        name="api-backup-download",
+    ),
+    path(
         "backup/<str:filename>/",
         views.BackupApiView.as_view(),
         name="api-backup",

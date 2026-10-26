@@ -1,34 +1,37 @@
-"""interact with queue items"""
+"""Interact with ORM-backed pending downloads."""
 
-from common.src.es_connect import ElasticWrap
+from common.src.domain import download_data
+from common.src.runtime import RuntimeQueue
+from django.db import transaction
+from download.models import Download
 
 
 class PendingInteract:
-    """interact with items in download queue"""
+    """Update pending download rows and their leased queue entries."""
 
     def __init__(self, youtube_id=False, status=False):
         self.youtube_id = youtube_id
         self.status = status
+        self.queue = RuntimeQueue("download:pending")
 
+    @transaction.atomic
     def delete_item(self, print_error: bool = True) -> None:
-        """delete single item from pending"""
-        path = f"ta_download/_doc/{self.youtube_id}"
-        _, _ = ElasticWrap(path).delete(refresh=True, print_error=print_error)
+        Download.objects.filter(pk=self.youtube_id).delete()
+        self.queue.discard(self.youtube_id)
 
+    @transaction.atomic
     def delete_bulk(self, channel_id: str | None, vid_type: str | None):
-        """delete all matching item by status"""
-        must_list = [{"term": {"status": {"value": self.status}}}]
+        query = Download.objects.filter(status=self.status)
         if channel_id:
-            must_list.append({"term": {"channel_id": {"value": channel_id}}})
-
+            query = query.filter(channel_id=channel_id)
         if vid_type:
-            must_list.append({"term": {"vid_type": {"value": vid_type}}})
+            query = query.filter(video_type=vid_type)
+        ids = list(query.values_list("pk", flat=True))
+        query.delete()
+        for item_id in ids:
+            self.queue.discard(item_id)
 
-        data = {"query": {"bool": {"must": must_list}}}
-
-        path = "ta_download/_delete_by_query?refresh=true"
-        _, _ = ElasticWrap(path).post(data=data)
-
+    @transaction.atomic
     def update_bulk(
         self,
         channel_id: str | None,
@@ -36,80 +39,58 @@ class PendingInteract:
         new_status: str,
         error: bool | None = None,
     ):
-        """update status in bulk"""
-        must_list = [{"term": {"status": {"value": self.status}}}]
-        must_not_list = []
-
+        query = Download.objects.filter(status=self.status)
         if channel_id:
-            must_list.append({"term": {"channel_id": {"value": channel_id}}})
-
+            query = query.filter(channel_id=channel_id)
         if vid_type:
-            must_list.append({"term": {"vid_type": {"value": vid_type}}})
-
+            query = query.filter(video_type=vid_type)
         if error is not None:
-            exists = {"exists": {"field": "message"}}
-            if error:
-                must_list.append(exists)  # type: ignore
+            query = (
+                query.filter(metadata__has_key="message")
+                if error
+                else query.exclude(metadata__has_key="message")
+            )
+        for item in query:
+            if new_status == "priority":
+                item.status = "pending"
+                item.metadata["auto_start"] = True
+                item.metadata.pop("message", None)
+            elif new_status == "clear_error":
+                item.metadata.pop("message", None)
             else:
-                must_not_list.append(exists)
+                item.status = new_status
+            item.save(update_fields=["status", "metadata"])
+            if item.status == "pending" and "message" not in item.metadata:
+                self.queue.add(item.pk)
+            elif item.status == "ignore":
+                self.queue.discard(item.pk)
 
-        if new_status == "priority":
-            source = """
-            ctx._source.status = 'pending';
-            ctx._source.auto_start = true;
-            ctx._source.message = null;
-            """
-        elif new_status == "clear_error":
-            source = "ctx._source.message = null"
-        else:
-            source = f"ctx._source.status = '{new_status}'"
-
-        data = {
-            "query": {"bool": {"must": must_list, "must_not": must_not_list}},
-            "script": {"source": source, "lang": "painless"},
-        }
-
-        path = "ta_download/_update_by_query?refresh=true"
-        _, _ = ElasticWrap(path).post(data)
-
+    @transaction.atomic
     def update_status(self):
-        """update status of pending item"""
+        item = Download.objects.filter(pk=self.youtube_id).first()
+        if not item:
+            return
         if self.status == "priority":
-            data = {
-                "doc": {
-                    "status": "pending",
-                    "auto_start": True,
-                    "message": None,
-                }
-            }
+            item.status = "pending"
+            item.metadata["auto_start"] = True
+            item.metadata.pop("message", None)
         else:
-            data = {"doc": {"status": self.status}}
-
-        path = f"ta_download/_update/{self.youtube_id}/?refresh=true"
-        _, _ = ElasticWrap(path).post(data=data)
+            item.status = self.status
+        item.save(update_fields=["status", "metadata"])
+        if item.status == "pending" and "message" not in item.metadata:
+            self.queue.add(item.pk)
+        elif item.status == "ignore":
+            self.queue.discard(item.pk)
 
     def get_item(self):
-        """return pending item dict"""
-        path = f"ta_download/_doc/{self.youtube_id}"
-        response, status_code = ElasticWrap(path).get()
-        return response["_source"], status_code
+        item = Download.objects.filter(pk=self.youtube_id).first()
+        return (download_data(item), 200) if item else ({}, 404)
 
     def get_channel(self):
-        """
-        get channel metadata from queue to not depend on channel to be indexed
-        """
-        data = {
-            "size": 1,
-            "query": {"term": {"channel_id": {"value": self.youtube_id}}},
-        }
-        response, _ = ElasticWrap("ta_download/_search").get(data=data)
-        hits = response["hits"]["hits"]
-        if not hits:
-            channel_name = "NA"
-        else:
-            channel_name = hits[0]["_source"].get("channel_name", "NA")
-
+        item = Download.objects.filter(channel_id=self.youtube_id).first()
         return {
             "channel_id": self.youtube_id,
-            "channel_name": channel_name,
+            "channel_name": (
+                item.metadata.get("channel_name", "NA") if item else "NA"
+            ),
         }

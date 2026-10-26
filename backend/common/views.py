@@ -14,14 +14,14 @@ from common.serializers import (
     RefreshResponseSerializer,
     WatchedDataSerializer,
 )
+from common.src.runtime import RuntimeStore
 from common.src.searching import SearchForm
-from common.src.ta_redis import RedisArchivist
 from common.src.watched import WatchState
 from common.views_base import AdminOnly, ApiBaseView
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from task.tasks import check_reindex
+from task.jobs import enqueue_task
 
 
 class PingView(ApiBaseView):
@@ -106,12 +106,17 @@ class RefreshView(ApiBaseView):
         validated_data = data_serializer.validated_data
 
         extract_videos = validated_query.get("extract_videos")
-        task = check_reindex.delay(
-            data=validated_data, extract_videos=extract_videos
+        task_id = str(
+            enqueue_task(
+                "check_reindex",
+                data=validated_data,
+                extract_videos=extract_videos,
+            )
         )
         message = {
             "message": "reindex task started",
-            "task_id": task.id,
+            "task_id": task_id,
+            "status": "PENDING",
         }
         serializer = AsyncTaskResponseSerializer(message)
 
@@ -192,11 +197,11 @@ class NotificationView(ApiBaseView):
         validated_query = query_serializer.validated_data
         filter_by = validated_query.get("filter")
 
-        query = "message"
-        if filter_by in self.valid_filters:
-            query = f"{query}:{filter_by}"
-
-        notifications = RedisArchivist().list_items(query)
+        notifications = [
+            item
+            for item in RuntimeStore().list_items("message:")
+            if filter_by is None or item.get("group", "").startswith(filter_by)
+        ]
         response_serializer = NotificationSerializer(notifications, many=True)
 
         return Response(response_serializer.data)

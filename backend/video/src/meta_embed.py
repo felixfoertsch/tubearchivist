@@ -12,11 +12,11 @@ from appsettings.src.config import AppConfig, AppConfigType
 from channel.serializers import ChannelSerializer
 from channel.src.index import YoutubeChannel
 from common.src.env_settings import EnvironmentSettings
-from common.src.es_connect import ElasticWrap, IndexPaginate
 from download.src.thumbnails import ThumbManager
 from mutagen.mp4 import MP4, MP4FreeForm
 from playlist.serializers import PlaylistSerializer
 from playlist.src.index import YoutubePlaylist
+from video.models import Video
 from video.serializers import (
     CommentsSerializer,
     SubtitleFragmentSerializer,
@@ -37,27 +37,16 @@ class MetadataEmbed:
 
     def embed(self):
         """entry point"""
-        data = {
-            "query": {"match_all": {}},
-            "_source": ["youtube_id"],
-        }
-        paginate = IndexPaginate(
-            index_name=self.INDEX_NAME,
-            data=data,
-            size=100,
-            callback=MetadataEmbedCallback,
-            task=self.task,
-            total=self._get_total(),
-            pit_keep_alive=1000,
+        rows = (
+            Video.objects.order_by("pk")
+            .values_list("pk", flat=True)
+            .iterator(chunk_size=100)
         )
-        _ = paginate.get_results()
+        MetadataEmbedCallback(rows, self.INDEX_NAME).run()
 
     def _get_total(self):
         """get total documents in index"""
-        path = f"{self.INDEX_NAME}/_count"
-        response, _ = ElasticWrap(path).get()
-
-        return response.get("count")
+        return Video.objects.count()
 
 
 class MetadataEmbedCallback:
@@ -70,8 +59,7 @@ class MetadataEmbedCallback:
 
     def run(self):
         """run embed"""
-        for video in self.source:
-            youtube_id = video["_source"]["youtube_id"]
+        for youtube_id in self.source:
             YoutubeVideo(youtube_id).embed_metadata()
 
 
@@ -159,10 +147,10 @@ class IndexFromEmbed:
             channel_data_clean["channel_subscribed"] = False
 
         channel = YoutubeChannel(youtube_id=channel_data_clean["channel_id"])
-        channel.get_from_es()
+        channel.get_from_db()
         if not channel.json_data:
             channel.json_data = channel_data_clean
-            channel.upload_to_es()
+            channel.save_to_db()
 
         return channel.json_data
 
@@ -185,10 +173,10 @@ class IndexFromEmbed:
 
         video_data_clean["channel"] = channel_data_clean
         video = YoutubeVideo(youtube_id=video_data_clean["youtube_id"])
-        video.get_from_es()
+        video.get_from_db()
         if not video.json_data:
             video.json_data = video_data_clean
-            video.upload_to_es()
+            video.save_to_db()
 
         return video
 
@@ -249,7 +237,7 @@ class IndexFromEmbed:
                 return None
 
         playlist = YoutubePlaylist(youtube_id=playlist_data["playlist_id"])
-        playlist.get_from_es()
+        playlist.get_from_db()
         if playlist.json_data:
             # already indexed
             return None
@@ -260,7 +248,7 @@ class IndexFromEmbed:
             playlist_data_clean["playlist_sort_order"] = "top"
 
         playlist.json_data = playlist_data_clean
-        playlist.upload_to_es()
+        playlist.save_to_db()
 
         return playlist.json_data
 
@@ -335,14 +323,10 @@ class IndexFromEmbed:
             (i["subtitle_lang"], i["subtitle_source"]) for i in subtitle_data
         }
         subs = YoutubeSubtitle(video)
-        response = subs.get_es_subtitles()
-        indexed = {
-            (i["subtitle_lang"], i["subtitle_source"]) for i in response
-        }
-
+        response = subs.get_saved_subtitles()
         for embedded_lang, embedded_source in embedded_subs:
             needs_processing = self._process_subtitle(
-                indexed, embedded_lang, embedded_source
+                response, embedded_lang, embedded_source
             )
             if not needs_processing:
                 continue
@@ -369,8 +353,10 @@ class IndexFromEmbed:
                 )
 
             subtitle_str = parser.get_subtitle_str()
-            query_str = parser.create_bulk_import(to_index)
-            subs.index_subtitle(query_str)
+            video_obj = Video.objects.get(pk=video.youtube_id)
+            subs.replace_subtitles(
+                video_obj, to_index, lang=embedded_lang, source=embedded_source
+            )
 
             media_url = subs.get_media_url(lang=embedded_lang)
             dest_path = os.path.join(self.VIDEOS_BASE, media_url)
@@ -382,8 +368,8 @@ class IndexFromEmbed:
         """check if subtitle should be processed"""
         for sub_indexed in indexed:
             if (
-                sub_indexed.get("lang") == embedded_lang
-                and sub_indexed.get("source") == embedded_source
+                sub_indexed["subtitle_lang"] == embedded_lang
+                and sub_indexed["subtitle_source"] == embedded_source
             ):
                 # already indexed
                 return False
@@ -424,7 +410,7 @@ class IndexFromEmbed:
                 return
 
         comments = Comments(youtube_id=serializer.data["youtube_id"])
-        existing = comments.get_es_comments()
+        existing = comments.get_comments()
         if existing:
             return
 

@@ -72,19 +72,31 @@ def test_reconcile(entries, pending, error, deleted):
         f"{MODULE}.get_last_channel_videos",
         return_value=entries,
         side_effect=error,
-    ) as fetch, patch(f"{MODULE}.IndexPaginate") as index, patch(
-        f"{MODULE}.delete_and_ignore"
-    ) as remove:
-        index.return_value.get_results.side_effect = [
-            pending,
-            [
-                {"youtube_id": "new", "vid_type": "videos"},
-                {"youtube_id": "old", "vid_type": "videos"},
-                {"youtube_id": "short", "vid_type": "shorts"},
-                {"youtube_id": "live", "vid_type": "streams"},
-            ],
+    ) as fetch, patch(f"{MODULE}.delete_and_ignore") as remove, patch(
+        f"{MODULE}.Download.objects.filter"
+    ) as downloads, patch(
+        f"{MODULE}.Video.objects.filter"
+    ) as videos:
+        downloads.return_value.exists.return_value = bool(pending)
+        videos.return_value = [
+            Mock(pk="new", video_type="videos"),
+            Mock(pk="old", video_type="videos"),
+            Mock(pk="short", video_type="shorts"),
+            Mock(pk="live", video_type="streams"),
         ]
-        rolling.reconcile()
+        with patch(f"{MODULE}.Video.objects.filter") as archive, patch(
+            f"{MODULE}.video_data",
+            side_effect=lambda obj: {
+                "youtube_id": obj.pk,
+                "vid_type": (
+                    "videos"
+                    if obj.pk in {"new", "old"}
+                    else "shorts" if obj.pk == "short" else "streams"
+                ),
+            },
+        ):
+            archive.return_value = videos.return_value
+            rolling.reconcile()
         fetch.assert_called_once_with(
             "c", rolling.config, limit=2, query_filter=VideoTypeEnum.VIDEOS
         )
@@ -92,10 +104,9 @@ def test_reconcile(entries, pending, error, deleted):
             remove.assert_called_once_with(
                 [{"youtube_id": "old", "vid_type": "videos"}]
             )
-            pending_query = index.call_args_list[0].args[1]
-            assert {"term": {"vid_type": "videos"}} in pending_query["query"][
-                "bool"
-            ]["filter"]
+            downloads.assert_called_once_with(
+                channel_id="c", status="pending", video_type="videos"
+            )
         else:
             remove.assert_not_called()
         rolling.settings.assert_called_once()
@@ -126,28 +137,4 @@ def test_flat_fetch_is_bounded_and_discards_error_response():
                 "c", {}, limit=2, query_filter=VideoTypeEnum.VIDEOS
             )
             == []
-        )
-
-
-def test_delete_and_ignore_reuses_queue():
-    from download.src.queue import delete_and_ignore
-
-    videos = [{"youtube_id": "old", "vid_type": "videos"}]
-    with patch("download.src.queue.YoutubeVideo") as video, patch(
-        "download.src.queue.PendingList"
-    ) as queue:
-        delete_and_ignore(videos)
-        video.assert_called_once_with("old")
-        video.return_value.delete_media_file.assert_called_once()
-        queue.assert_called_once_with(
-            youtube_ids=[
-                {
-                    "type": "video",
-                    "url": "old",
-                    "vid_type": VideoTypeEnum.VIDEOS,
-                }
-            ]
-        )
-        queue.return_value.parse_url_list.assert_called_once_with(
-            status="ignore"
         )

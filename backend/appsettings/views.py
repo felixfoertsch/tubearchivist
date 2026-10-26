@@ -7,28 +7,22 @@ from appsettings.serializers import (
     CookieValidationSerializer,
     ManualImportConfig,
     RescanFileSystemConfig,
-    SnapshotCreateResponseSerializer,
-    SnapshotItemSerializer,
-    SnapshotListSerializer,
-    SnapshotRestoreResponseSerializer,
     TokenResponseSerializer,
 )
-from appsettings.src.backup import ElasticBackup
+from appsettings.src.backup import PostgreSQLBackup
 from appsettings.src.config import AppConfig
-from appsettings.src.snapshot import ElasticSnapshot
 from common.serializers import (
     AsyncTaskResponseSerializer,
     ErrorResponseSerializer,
 )
-from common.src.ta_redis import RedisArchivist
+from common.src.runtime import RuntimeStore
 from common.views_base import AdminOnly, AdminWriteOnly, ApiBaseView
-from django.conf import settings
+from django.http import FileResponse
 from download.src.yt_dlp_base import CookieHandler
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework.authtoken.models import Token
 from rest_framework.response import Response
 from task.src.task_manager import TaskCommand
-from task.tasks import run_restore_backup
 
 
 class BackupApiListView(ApiBaseView):
@@ -49,7 +43,7 @@ class BackupApiListView(ApiBaseView):
     def get(request):
         """get list of available backup files"""
         # pylint: disable=unused-argument
-        backup_files = ElasticBackup().get_all_backup_files()
+        backup_files = PostgreSQLBackup().get_all_backup_files()
         serializer = BackupFileSerializer(backup_files, many=True)
         return Response(serializer.data)
 
@@ -93,7 +87,7 @@ class BackupApiView(ApiBaseView):
     def get(request, filename):
         """get single backup"""
         # pylint: disable=unused-argument
-        backup_file = ElasticBackup().build_backup_file_data(filename)
+        backup_file = PostgreSQLBackup().build_backup_file_data(filename)
         if not backup_file:
             error = ErrorResponseSerializer({"error": "file not found"})
             return Response(error.data, status=404)
@@ -111,20 +105,18 @@ class BackupApiView(ApiBaseView):
         }
     )
     def post(self, request, filename):
-        """start new task to restore backup file"""
-        # pylint: disable=unused-argument
-        backup_file = ElasticBackup().build_backup_file_data(filename)
-        if not backup_file:
-            error = ErrorResponseSerializer({"error": "file not found"})
-            return Response(error.data, status=404)
-
-        task = run_restore_backup.delay(filename)
-        message = {
-            "message": "backup restore task started",
-            "filename": filename,
-            "task_id": task.id,
-        }
-        return Response(message)
+        """Restore requires quiesced offline maintenance, never a web task."""
+        return Response(
+            {
+                "error": (
+                    "Online restore is disabled. Stop app and workers, "
+                    "then run python manage.py ta_restore_backup <filename> "
+                    "--quiesced --target-database <database>. "
+                    "See backend/docs/postgresql-backup.md."
+                )
+            },
+            status=409,
+        )
 
     @staticmethod
     @extend_schema(
@@ -139,12 +131,30 @@ class BackupApiView(ApiBaseView):
         """delete backup file"""
         # pylint: disable=unused-argument
 
-        backup_file = ElasticBackup().delete_file(filename)
+        backup_file = PostgreSQLBackup().delete_file(filename)
         if not backup_file:
             error = ErrorResponseSerializer({"error": "file not found"})
             return Response(error.data, status=404)
 
         return Response(status=204)
+
+
+class BackupDownloadView(ApiBaseView):
+    """Authenticated download of native database artifacts."""
+
+    permission_classes = [AdminOnly]
+
+    @staticmethod
+    def get(request, filename):
+        info = PostgreSQLBackup().build_backup_file_data(filename)
+        if not info:
+            return Response({"error": "file not found"}, status=404)
+        return FileResponse(
+            open(info["file_path"], "rb"),
+            as_attachment=True,
+            filename=filename,
+            content_type="application/octet-stream",
+        )
 
 
 class AppConfigApiView(ApiBaseView):
@@ -249,9 +259,6 @@ class CookieView(ApiBaseView):
             error = ErrorResponseSerializer({"error": message})
             return Response(error.data, status=400)
 
-        if settings.DEBUG:
-            print(f"[cookie] preview:\n\n{cookie[:300]}")
-
         config = AppConfig().config
         handler = CookieHandler(config)
         handler.set_cookie(cookie)
@@ -284,7 +291,7 @@ class CookieView(ApiBaseView):
     def _get_cookie_validation():
         """get current cookie validation"""
         config = AppConfig().config
-        validation = RedisArchivist().get_message_dict("cookie:valid")
+        validation = RuntimeStore().get_message_dict("cookie:valid")
         is_enabled = {"cookie_enabled": config["downloads"]["cookie_import"]}
         validation.update(is_enabled)
 
@@ -292,38 +299,23 @@ class CookieView(ApiBaseView):
 
 
 class SnapshotApiListView(ApiBaseView):
-    """resolves to /api/appsettings/snapshot/
-    GET: returns snapshot config plus list of existing snapshots
-    POST: take snapshot now
-    """
+    """Retired snapshot route; native backups have separate endpoints."""
 
     permission_classes = [AdminOnly]
 
     @staticmethod
-    @extend_schema(
-        responses={
-            200: OpenApiResponse(SnapshotListSerializer()),
-        }
-    )
     def get(request):
-        """get available snapshots with metadata"""
-        # pylint: disable=unused-argument
-        snapshots = ElasticSnapshot().get_snapshot_stats()
-        serializer = SnapshotListSerializer(snapshots)
-        return Response(serializer.data)
+        return Response(
+            {
+                "supported": False,
+                "error": (
+                    "Snapshots are unsupported. Use /api/appsettings/backup/."
+                ),
+            },
+            status=410,
+        )
 
-    @staticmethod
-    @extend_schema(
-        responses={
-            200: OpenApiResponse(SnapshotCreateResponseSerializer()),
-        }
-    )
-    def post(request):
-        """take snapshot now"""
-        # pylint: disable=unused-argument
-        response = ElasticSnapshot().take_snapshot_now()
-        serializer = SnapshotCreateResponseSerializer(response)
-        return Response(serializer.data)
+    post = get
 
 
 class RescanFileSystem(ApiBaseView):
@@ -379,75 +371,25 @@ class ManualImportView(ApiBaseView):
 
 
 class SnapshotApiView(ApiBaseView):
-    """resolves to /api/appsettings/snapshot/<snapshot-id>/
-    GET: return a single snapshot
-    POST: restore snapshot
-    DELETE: delete a snapshot
-    """
+    """Fail closed for retired Elasticsearch snapshot operations."""
 
     permission_classes = [AdminOnly]
 
     @staticmethod
-    @extend_schema(
-        responses={
-            200: OpenApiResponse(SnapshotItemSerializer()),
-            404: OpenApiResponse(
-                ErrorResponseSerializer(), description="snapshot not found"
-            ),
-        }
-    )
     def get(request, snapshot_id):
-        """handle get request"""
-        # pylint: disable=unused-argument
-        snapshot = ElasticSnapshot().get_single_snapshot(snapshot_id)
+        return Response(
+            {
+                "error": (
+                    "Legacy snapshots are unsupported. "
+                    "Use PostgreSQL backups; "
+                    "restore requires offline maintenance."
+                )
+            },
+            status=410,
+        )
 
-        if not snapshot:
-            error = ErrorResponseSerializer({"error": "snapshot not found"})
-            return Response(error.data, status=404)
-
-        serializer = SnapshotItemSerializer(snapshot)
-        return Response(serializer.data)
-
-    @staticmethod
-    @extend_schema(
-        responses={
-            200: OpenApiResponse(SnapshotRestoreResponseSerializer()),
-            400: OpenApiResponse(
-                ErrorResponseSerializer(), description="bad request"
-            ),
-        }
-    )
-    def post(request, snapshot_id):
-        """restore snapshot"""
-        # pylint: disable=unused-argument
-        response = ElasticSnapshot().restore_all(snapshot_id)
-        if not response:
-            error = ErrorResponseSerializer(
-                {"error": "failed to restore snapshot"}
-            )
-            return Response(error.data, status=400)
-
-        serializer = SnapshotRestoreResponseSerializer(response)
-
-        return Response(serializer.data)
-
-    @staticmethod
-    @extend_schema(
-        responses={
-            204: OpenApiResponse(description="delete snapshot from index"),
-        }
-    )
-    def delete(request, snapshot_id):
-        """delete snapshot from index"""
-        # pylint: disable=unused-argument
-        response = ElasticSnapshot().delete_single_snapshot(snapshot_id)
-        if not response:
-            error = ErrorResponseSerializer(
-                {"error": "failed to delete snapshot"}
-            )
-            return Response(error.data, status=400)
-
-        return Response(status=204)
+    post = get
+    delete = get
 
 
 class TokenView(ApiBaseView):

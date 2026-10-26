@@ -4,19 +4,18 @@ functionality:
 - index and update in es
 """
 
-import json
 from datetime import datetime
 
-from common.src.es_connect import ElasticWrap, IndexPaginate
 from common.src.index_generic import YouTubeItem
 from download.src.thumbnails import ThumbManager
+from playlist.models import PlaylistEntry
+from video.models import Video
 from video.src import index as ta_video
 
 
 class YoutubePlaylist(YouTubeItem):
     """represents a single youtube playlist"""
 
-    es_path = False
     index_name = "ta_playlist"
     yt_obs = {
         "extract_flat": True,
@@ -31,7 +30,7 @@ class YoutubePlaylist(YouTubeItem):
 
     def build_json(self, scrape=False):
         """collection to create json_data"""
-        self.get_from_es()
+        self.get_from_db()
         if self.json_data:
             subscribed = self.json_data.get("playlist_subscribed")
             playlist_sort_order = self.json_data.get("playlist_sort_order")
@@ -98,27 +97,17 @@ class YoutubePlaylist(YouTubeItem):
 
     def get_playlist_videos(self):
         """get all playlist videos"""
-        data = {
-            "query": {
-                "term": {"playlist.keyword": {"value": self.youtube_id}}
-            },
-            "_source": ["youtube_id"],
-        }
-        result = IndexPaginate("ta_video", data).get_results()
-
-        return result
+        ids = PlaylistEntry.objects.filter(
+            playlist_id=self.youtube_id
+        ).values_list("video_id", flat=True)
+        return [{"youtube_id": video_id} for video_id in ids]
 
     def get_local_vids(self) -> list[str]:
         """get local video ids from youtube entries"""
-        entries = self.youtube_meta["entries"]
-        data = {
-            "query": {"terms": {"youtube_id": [i["id"] for i in entries]}},
-            "_source": ["youtube_id"],
-        }
-        indexed_vids = IndexPaginate("ta_video", data).get_results()
-        ids_found = [i["youtube_id"] for i in indexed_vids]
-
-        return ids_found
+        ids = [i["id"] for i in self.youtube_meta["entries"]]
+        return list(
+            Video.objects.filter(pk__in=ids).values_list("pk", flat=True)
+        )
 
     def get_entries(self, ids_found) -> None:
         """get all videos in playlist, match downloaded with ids_found"""
@@ -144,85 +133,41 @@ class YoutubePlaylist(YouTubeItem):
         """change subscribe status"""
         self.build_json()
         self.json_data["playlist_subscribed"] = new_subscribe_state
-        self.upload_to_es()
+        self.save_to_db()
         return self.json_data
 
     def add_vids_to_playlist(self):
-        """sync the playlist id to videos"""
-        script = (
-            'if (!ctx._source.containsKey("playlist")) '
-            + "{ctx._source.playlist = [params.playlist]} "
-            + "else if (!ctx._source.playlist.contains(params.playlist)) "
-            + "{ctx._source.playlist.add(params.playlist)} "
-            + "else {ctx.op = 'none'}"
-        )
-
-        bulk_list = []
-        for entry in self.json_data["playlist_entries"]:
-            video_id = entry["youtube_id"]
-            action = {"update": {"_id": video_id, "_index": "ta_video"}}
-            source = {
-                "script": {
-                    "source": script,
-                    "lang": "painless",
-                    "params": {"playlist": self.youtube_id},
-                }
-            }
-            bulk_list.append(json.dumps(action))
-            bulk_list.append(json.dumps(source))
-
-        # add last newline
-        bulk_list.append("\n")
-        query_str = "\n".join(bulk_list)
-
-        ElasticWrap("_bulk").post(query_str, ndjson=True)
+        """Membership represented by PlaylistEntry, not video JSON."""
+        return None
 
     def remove_vids_from_playlist(self):
         """remove playlist ids from videos if needed"""
-        needed = [i["youtube_id"] for i in self.json_data["playlist_entries"]]
-        result = self.get_playlist_videos()
-        to_remove = [
-            i["youtube_id"] for i in result if i["youtube_id"] not in needed
-        ]
-        s = "ctx._source.playlist.removeAll(Collections.singleton(params.rm))"
-        for video_id in to_remove:
-            query = {
-                "script": {
-                    "source": s,
-                    "lang": "painless",
-                    "params": {"rm": self.youtube_id},
-                },
-                "query": {"match": {"youtube_id": video_id}},
-            }
-            path = "ta_video/_update_by_query"
-            _, status_code = ElasticWrap(path).post(query)
-            if status_code == 200:
-                print(f"{self.youtube_id}: removed {video_id} from playlist")
+        return None
 
     def match_local(self):
         """match local videos as indexed"""
         ids = [i["youtube_id"] for i in self.json_data["playlist_entries"]]
-        data = {
-            "query": {"terms": {"youtube_id": ids}},
-            "_source": ["youtube_id", "title", "channel.channel_name"],
+        indexed_vids = {
+            video.pk: video
+            for video in Video.objects.filter(pk__in=ids).select_related(
+                "channel"
+            )
         }
-        local_vids = IndexPaginate("ta_video", data).get_results()
-        indexed_vids = {i["youtube_id"]: i for i in local_vids}
 
         new_entries = []
         for entry in self.json_data["playlist_entries"]:
             if local_vid := indexed_vids.get(entry["youtube_id"]):
                 entry.update(
                     {
-                        "title": local_vid["title"],
-                        "uploader": local_vid["channel"]["channel_name"],
+                        "title": local_vid.title,
+                        "uploader": local_vid.channel.name,
                         "downloaded": True,
                     }
                 )
             new_entries.append(entry)
 
         self.json_data["playlist_entries"] = new_entries
-        self.upload_to_es()
+        self.save_to_db()
 
     def update_playlist(self, skip_on_empty=False):
         """update metadata for playlist with data from YouTube"""
@@ -238,7 +183,7 @@ class YoutubePlaylist(YouTubeItem):
             if not has_item_downloaded:
                 return True
 
-        self.upload_to_es()
+        self.save_to_db()
         self.add_vids_to_playlist()
         self.remove_vids_from_playlist()
         self.get_playlist_art()
@@ -249,7 +194,7 @@ class YoutubePlaylist(YouTubeItem):
         playlist = YoutubePlaylist(self.youtube_id)
         playlist.build_json()
         playlist.json_data["playlist_sort_order"] = new_sort_order
-        playlist.upload_to_es()
+        playlist.save_to_db()
 
         return playlist.json_data
 
@@ -292,39 +237,24 @@ class YoutubePlaylist(YouTubeItem):
     def delete_metadata(self):
         """delete metadata for playlist"""
         self.delete_videos_metadata()
-        script = (
-            "ctx._source.playlist.removeAll("
-            + "Collections.singleton(params.playlist)) "
-        )
-        data = {
-            "query": {
-                "term": {"playlist.keyword": {"value": self.youtube_id}}
-            },
-            "script": {
-                "source": script,
-                "lang": "painless",
-                "params": {"playlist": self.youtube_id},
-            },
-        }
-        _, _ = ElasticWrap("ta_video/_update_by_query").post(data)
-        self.del_in_es()
+        self.delete_from_db()
 
     def is_custom_playlist(self):
         """check if is custom playlist"""
         if not self.json_data:
-            self.get_from_es()
+            self.get_from_db()
 
         return self.json_data["playlist_type"] == "custom"
 
     def delete_videos_metadata(self, channel_id=None):
         """delete video metadata for a specific channel"""
-        self.get_from_es()
+        self.get_from_db()
         playlist = self.json_data["playlist_entries"]
         i = 0
         while i < len(playlist):
             video_id = playlist[i]["youtube_id"]
             video = ta_video.YoutubeVideo(video_id)
-            video.get_from_es()
+            video.get_from_db()
             if (
                 channel_id is None
                 or video.json_data["channel"]["channel_id"] == channel_id
@@ -334,12 +264,12 @@ class YoutubePlaylist(YouTubeItem):
                 i -= 1
             i += 1
         self.set_playlist_thumbnail()
-        self.upload_to_es()
+        self.save_to_db()
 
     def delete_videos_playlist(self):
         """delete playlist with all videos"""
         print(f"{self.youtube_id}: delete playlist")
-        self.get_from_es()
+        self.get_from_db()
         all_youtube_id = [
             i["youtube_id"]
             for i in self.json_data["playlist_entries"]
@@ -359,19 +289,19 @@ class YoutubePlaylist(YouTubeItem):
             "playlist_last_refresh": int(datetime.now().timestamp()),
             "playlist_entries": [],
             "playlist_type": "custom",
-            "playlist_channel": None,
-            "playlist_channel_id": None,
+            "playlist_channel": "",
+            "playlist_channel_id": "",
             "playlist_description": False,
             "playlist_thumbnail": False,
             "playlist_subscribed": False,
             "playlist_sort_order": "top",
         }
-        self.upload_to_es()
+        self.save_to_db()
         self.get_playlist_art()
         return True
 
     def add_video_to_playlist(self, video_id):
-        self.get_from_es()
+        self.get_from_db()
         video_metadata = self.get_video_metadata(video_id)
         video_metadata["idx"] = len(self.json_data["playlist_entries"])
 
@@ -381,27 +311,18 @@ class YoutubePlaylist(YouTubeItem):
                 datetime.now().timestamp()
             )
             self.set_playlist_thumbnail()
-            self.upload_to_es()
-            video = ta_video.YoutubeVideo(video_id)
-            video.get_from_es()
-            if "playlist" not in video.json_data:
-                video.json_data["playlist"] = []
-            video.json_data["playlist"].append(self.youtube_id)
-            video.upload_to_es()
+            self.save_to_db()
         return True
 
     def remove_playlist_from_video(self, video_id):
-        """remove playlist id from video metadata"""
-        video = ta_video.YoutubeVideo(video_id)
-        video.get_from_es()
-        if video.json_data is not None and "playlist" in video.json_data:
-            if self.youtube_id in video.json_data["playlist"]:
-                video.json_data["playlist"].remove(self.youtube_id)
-                video.upload_to_es()
+        """Remove membership from ordered playlist entries."""
+        PlaylistEntry.objects.filter(
+            playlist_id=self.youtube_id, video_id=video_id
+        ).delete()
 
     def move_video(self, video_id, action, hide_watched=False):
         """move video within custion playlist based on action"""
-        self.get_from_es()
+        self.get_from_db()
         video_index = self.get_video_index(video_id)
         playlist = self.json_data["playlist_entries"]
         item = playlist[video_index]
@@ -448,7 +369,7 @@ class YoutubePlaylist(YouTubeItem):
             item["idx"] = i
 
         self.set_playlist_thumbnail()
-        self.upload_to_es()
+        self.save_to_db()
 
         return True
 
@@ -484,7 +405,7 @@ class YoutubePlaylist(YouTubeItem):
 
     def get_video_is_watched(self, video_id):
         video = ta_video.YoutubeVideo(video_id)
-        video.get_from_es()
+        video.get_from_db()
         return video.json_data["player"]["watched"]
 
     def set_playlist_thumbnail(self):
@@ -500,7 +421,7 @@ class YoutubePlaylist(YouTubeItem):
 
     def get_video_metadata(self, video_id):
         video = ta_video.YoutubeVideo(video_id)
-        video.get_from_es()
+        video.get_from_db()
         video_json_data = {
             "youtube_id": video.json_data["youtube_id"],
             "title": video.json_data["title"],

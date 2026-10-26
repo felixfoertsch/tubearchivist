@@ -1,16 +1,13 @@
 """send notifications using apprise"""
 
 import apprise
-from common.src.es_connect import ElasticWrap
+from task.models import NotificationURL
 from task.src.task_config import TASK_CONFIG
 from task.src.task_manager import TaskManager
 
 
 class Notifications:
-    """store notifications in ES"""
-
-    GET_PATH = "ta_config/_doc/notify"
-    UPDATE_PATH = "ta_config/_update/notify/"
+    """store task notification destinations"""
 
     def __init__(self, task_name: str):
         self.task_name = task_name
@@ -77,97 +74,47 @@ class Notifications:
 
     def get_urls(self) -> list[str]:
         """get stored urls for task"""
-        response, code = ElasticWrap(self.GET_PATH).get(print_error=False)
-        if not code == 200:
-            return []
-
-        urls = response["_source"].get(self.task_name, [])
-
-        return urls
+        return list(
+            NotificationURL.objects.filter(task_name=self.task_name)
+            .order_by("pk")
+            .values_list("url", flat=True)
+        )
 
     def add_url(self, url: str) -> None:
         """add url to task notification"""
-        source = (
-            "if (!ctx._source.containsKey(params.task_name)) "
-            + "{ctx._source[params.task_name] = [params.url]} "
-            + "else if (!ctx._source[params.task_name].contains(params.url)) "
-            + "{ctx._source[params.task_name].add(params.url)} "
-            + "else {ctx.op = 'none'}"
+        NotificationURL.objects.get_or_create(
+            task_name=self.task_name, url=url
         )
-
-        data = {
-            "script": {
-                "source": source,
-                "lang": "painless",
-                "params": {"url": url, "task_name": self.task_name},
-            },
-            "upsert": {self.task_name: [url]},
-        }
-
-        _, _ = ElasticWrap(self.UPDATE_PATH).post(data)
 
     def remove_url(self, url: str) -> tuple[dict, int]:
         """remove url from task"""
-        source = (
-            "if (ctx._source.containsKey(params.task_name) "
-            + "&& ctx._source[params.task_name].contains(params.url)) "
-            + "{ctx._source[params.task_name]."
-            + "remove(ctx._source[params.task_name].indexOf(params.url))}"
-        )
-
-        data = {
-            "script": {
-                "source": source,
-                "lang": "painless",
-                "params": {"url": url, "task_name": self.task_name},
-            }
-        }
-
-        response, status_code = ElasticWrap(self.UPDATE_PATH).post(data)
-        if not self.get_urls():
-            _, _ = self.remove_task()
-
-        return response, status_code
+        deleted, _ = NotificationURL.objects.filter(
+            task_name=self.task_name, url=url
+        ).delete()
+        return {"deleted": deleted}, 200
 
     def remove_task(self) -> tuple[dict, int]:
         """remove all notifications from task"""
-        source = (
-            "if (ctx._source.containsKey(params.task_name)) "
-            + "{ctx._source.remove(params.task_name)}"
-        )
-        data = {
-            "script": {
-                "source": source,
-                "lang": "painless",
-                "params": {"task_name": self.task_name},
-            }
-        }
-
-        response, status_code = ElasticWrap(self.UPDATE_PATH).post(data)
-
-        return response, status_code
+        deleted, _ = NotificationURL.objects.filter(
+            task_name=self.task_name
+        ).delete()
+        return {"deleted": deleted}, 200
 
 
-def get_all_notifications() -> dict[str, list[str]]:
+def get_all_notifications() -> dict[str, dict[str, object]]:
     """get all notifications stored"""
-    path = "ta_config/_doc/notify"
-    response, status_code = ElasticWrap(path).get(print_error=False)
-    if not status_code == 200:
-        return {}
-
-    notifications: dict = {}
-    source = response.get("_source")
-    if not source:
-        return notifications
-
-    for task_id, urls in source.items():
-        notifications.update(
-            {
-                task_id: {
-                    "urls": urls,
-                    "title": TASK_CONFIG[task_id]["title"],
-                }
-            }
-        )
-
+    notifications: dict[str, dict[str, object]] = {}
+    for task_id in (
+        NotificationURL.objects.order_by("task_name")
+        .values_list("task_name", flat=True)
+        .distinct()
+    ):
+        notifications[task_id] = {
+            "urls": list(
+                NotificationURL.objects.filter(task_name=task_id)
+                .order_by("pk")
+                .values_list("url", flat=True)
+            ),
+            "title": TASK_CONFIG[task_id]["title"],
+        }
     return notifications

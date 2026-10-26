@@ -3,7 +3,7 @@
 from unittest.mock import Mock, patch
 
 import pytest
-from download.src.yt_dlp_base import YtWrap
+from download.src.yt_dlp_base import CookieHandler, YtWrap
 from yt_dlp.extractor.youtube import YoutubeIE
 
 BASE = "download.src.yt_dlp_base"
@@ -17,8 +17,8 @@ CONFIG = {"downloads": {"cookie_import": True}}
 
 
 @pytest.fixture
-def redis():
-    with patch(f"{BASE}.RedisArchivist") as store, patch(
+def store():
+    with patch(f"{BASE}.RuntimeStore") as store, patch(
         f"{BASE}.settings", Mock(DEBUG=False)
     ):
         store.return_value.get_message_str.return_value = COOKIE
@@ -42,7 +42,7 @@ def detail(ie, url):
     }
 
 
-def test_repeated_extract_loads_saves_and_refreshes_cookies(redis):
+def test_repeated_extract_loads_saves_and_refreshes_cookies(store):
     wrapper = YtWrap({"skip_download": True}, CONFIG)
     with patch.object(YoutubeIE, "_real_extract", detail):
         for video_id in IDS + IDS[:1]:
@@ -55,11 +55,18 @@ def test_repeated_extract_loads_saves_and_refreshes_cookies(redis):
     assert saved.startswith("# Netscape")
     assert "\x00" not in saved
     assert "synthetic\tvalue" in saved
-    redis.set_message.assert_called()
+    store.set_message.assert_called()
 
 
-def test_invalid_cookie_fails_closed_without_leaking_contents(redis, capsys):
-    redis.get_message_str.return_value = "synthetic-secret-invalid-header\n"
+def test_cached_invalid_cookie_validation_fails_closed(store):
+    store.get_message_dict.return_value = {"status": False}
+    with patch(f"{BASE}.YtWrap") as wrapper:
+        assert CookieHandler(CONFIG).validate() is False
+        wrapper.assert_not_called()
+
+
+def test_invalid_cookie_fails_closed_without_leaking_contents(store, capsys):
+    store.get_message_str.return_value = "synthetic-secret-invalid-header\n"
     wrapper = YtWrap({"skip_download": True}, CONFIG)
     with patch.object(YoutubeIE, "_real_extract") as extract:
         response, error = wrapper.extract(
@@ -70,4 +77,4 @@ def test_invalid_cookie_fails_closed_without_leaking_contents(redis, capsys):
         extract.assert_not_called()
     captured = capsys.readouterr()
     assert "synthetic-secret" not in captured.out + captured.err
-    redis.set_message.assert_not_called()
+    store.set_message.assert_not_called()

@@ -1,20 +1,11 @@
-"""
-Functionality:
-- Handle scheduler config update
-"""
+"""Persist and validate dynamic three-field TubeArchivist cron schedules."""
 
-from datetime import datetime
-
-from celery.schedules import crontab
-from common.src.env_settings import EnvironmentSettings
-from django.utils import dateformat
-from django_celery_beat.models import CrontabSchedule
+from django.utils import timezone
 from task.models import CustomPeriodicTask
-from task.src.task_config import TASK_CONFIG
 
 
 class ScheduleBuilder:
-    """build schedule dicts for beat"""
+    """Build database schedules consumed by the PostgreSQL scheduler."""
 
     SCHEDULES = {
         "update_subscribed": "0 8 *",
@@ -24,116 +15,95 @@ class ScheduleBuilder:
         "run_backup": "0 18 0",
         "version_check": "0 11 *",
     }
-    MSG = "message:setting"
 
     def update_schedule(
         self, task_name: str, cron_schedule: str, schedule_conf: dict | None
     ) -> CustomPeriodicTask:
-        """update schedule"""
         if cron_schedule == "auto":
             cron_schedule = self.SCHEDULES[task_name]
-
-        task = self.get_set_task(task_name, cron_schedule)
-
+        task, _ = CustomPeriodicTask.objects.get_or_create(
+            name=task_name,
+            defaults={"schedule": cron_schedule, "task_config": {}},
+        )
+        if cron_schedule is not None:
+            task.schedule = cron_schedule
         if schedule_conf:
-            for key, value in schedule_conf.items():
-                self.set_config(task_name, key, value)
-
+            task.task_config.update(schedule_conf)
+        task.last_run_at = timezone.now()
+        task.save()
         return task
 
     def get_set_task(self, task_name, schedule=False):
-        """get task"""
-        try:
-            task = CustomPeriodicTask.objects.get(name=task_name)
-        except CustomPeriodicTask.DoesNotExist:
-            description = TASK_CONFIG[task_name].get("title")
-            task = CustomPeriodicTask(
-                name=task_name,
-                task=task_name,
-                description=description,
-            )
-
+        task, _ = CustomPeriodicTask.objects.get_or_create(
+            name=task_name,
+            defaults={"schedule": "0 0 *", "task_config": {}},
+        )
         if schedule:
-            task_crontab = self.get_set_cron_tab(schedule)
-            task.crontab = task_crontab
-            task.last_run_at = dateformat.make_aware(datetime.now())
-            task.save()
-
+            task.schedule = schedule
+            task.last_run_at = timezone.now()
+            task.save(update_fields=["schedule", "last_run_at"])
         return task
 
     @staticmethod
-    def get_set_cron_tab(schedule: str) -> CrontabSchedule:
-        """needs to be validated before"""
-        kwargs = dict(zip(["minute", "hour", "day_of_week"], schedule.split()))
-        kwargs.update({"timezone": EnvironmentSettings.TZ})
-        task_crontab, _ = CrontabSchedule.objects.get_or_create(**kwargs)
-
-        return task_crontab
+    def get_set_cron_tab(schedule: str) -> str:
+        return schedule
 
     def set_config(
         self, task_name: str, key: str, value
     ) -> CustomPeriodicTask:
-        """set task_config, validate before"""
         task = CustomPeriodicTask.objects.get(name=task_name)
         task.task_config.update({key: value})
-        task.save()
-
+        task.save(update_fields=["task_config"])
         return task
 
 
 class CrontabValidator:
-    """validate crontab"""
+    """Validate existing three-field (minute, hour, weekday) UI format."""
 
-    CONFIG = {
-        "check_reindex": ["days"],
-        "run_backup": ["rotate"],
-    }
+    CONFIG = {"check_reindex": ["days"], "run_backup": ["rotate"]}
 
     @staticmethod
-    def validate_fields(cron_fields: str) -> None:
-        """expect 3 cron fields"""
-        if not len(cron_fields) == 3:
+    def validate_fields(cron_fields: list[str]) -> None:
+        if len(cron_fields) != 3:
             raise ValueError("expected three cron schedule fields")
 
     @staticmethod
-    def validate_minute(minute_field: str):
-        """expect minute int"""
+    def validate_minute(minute_field: str) -> None:
         if not minute_field.isdigit():
             raise ValueError("Invalid value for minutes. Must be an integer.")
-
-        minutes = int(minute_field)
-        if not 0 <= minutes <= 59:
+        if not 0 <= int(minute_field) <= 59:
             raise ValueError("Invalid minutes. Must be between 0 and 59.")
 
     @staticmethod
-    def validate_cron_tab(minute, hour, day_of_week):
-        """check if crontab can be created"""
+    def validate_cron_tab(minute: str, hour: str, day_of_week: str) -> None:
         try:
-            crontab(minute=minute, hour=hour, day_of_week=day_of_week)
-        except ValueError as err:
+            from croniter import croniter
+
+            if "/" in hour or "/" in day_of_week:
+                raise ValueError("step expressions are unsupported")
+            croniter(f"{minute} {hour} * * {day_of_week}")
+        except (ImportError, ValueError) as err:
             raise ValueError(f"invalid crontab: {err}") from err
 
     def validate_cron(self, cron_expression):
-        """create crontab schedule"""
         if not cron_expression or cron_expression == "auto":
             return
-
         cron_fields = cron_expression.split()
         self.validate_fields(cron_fields)
-
         minute, hour, day_of_week = cron_fields
         self.validate_minute(minute)
         self.validate_cron_tab(minute, hour, day_of_week)
 
     def validate_config(self, task_name: str, schedule_config: dict):
-        """validate config for given task"""
         if not schedule_config:
             return
-
         config_keys = self.CONFIG.get(task_name)
         if not config_keys:
             raise ValueError(f"task '{task_name}' doesn't take config")
-
-        for key in schedule_config:
+        for key, value in schedule_config.items():
             if key not in config_keys:
                 raise ValueError(f"invalid config key for task '{task_name}'")
+            if key == "days" and (not isinstance(value, int) or value < 1):
+                raise ValueError("days must be a positive integer")
+            if key == "rotate" and (not isinstance(value, int) or value < 0):
+                raise ValueError("rotate must be a non-negative integer")

@@ -169,8 +169,15 @@ class TaskIDView(ApiBaseView):
                     {"error": "task can not be killed"}
                 )
                 return Response(error.data, status=400)
-
-            TaskCommand().kill(task_id)
+            error = ErrorResponseSerializer(
+                {
+                    "error": (
+                        "running tasks cannot be forcibly killed; use stop "
+                        "for cooperative cancellation"
+                    )
+                }
+            )
+            return Response(error.data, status=409)
 
         return Response(status=204)
 
@@ -239,6 +246,14 @@ class ScheduleView(ApiBaseView):
                 {"error": "expected schedule or config key"}
             )
             return Response(error.data, status=400)
+
+        if task_name not in TASK_CONFIG:
+            return Response({"error": "task name not found"}, status=404)
+        if (
+            cron_schedule is None
+            and not CustomPeriodicTask.objects.filter(name=task_name).exists()
+        ):
+            return Response({"error": "schedule not found"}, status=404)
 
         try:
             validator = CrontabValidator()

@@ -4,7 +4,6 @@ import pytest
 from common.src.helper import (
     date_parser,
     get_duration_str,
-    get_mapping,
     is_shorts,
     randomizor,
     time_parser,
@@ -95,11 +94,16 @@ def test_time_parser_with_non_numeric_input():
         time_parser(timestamp)
 
 
-def test_get_mapping():
-    """test mappint"""
-    index_config = get_mapping()
-    assert isinstance(index_config, list)
-    assert all(isinstance(i, dict) for i in index_config)
+def test_domain_schema_uses_django_models():
+    """Native schema replaces JSON document mappings."""
+    from channel.models import Channel
+    from video.models import Video
+
+    assert Video._meta.get_field("channel").related_model is Channel
+    assert (
+        Video._meta.get_field("published").get_internal_type()
+        == "DateTimeField"
+    )
 
 
 def test_is_shorts():

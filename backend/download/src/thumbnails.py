@@ -9,11 +9,13 @@ from time import sleep
 from typing import Literal
 
 import requests
+from channel.models import Channel
 from common.src.env_settings import EnvironmentSettings
-from common.src.es_connect import ElasticWrap, IndexPaginate
-from common.src.helper import is_missing
+from download.models import Download
 from mutagen.mp4 import MP4, MP4Cover
 from PIL import Image, ImageFile, UnidentifiedImageError
+from playlist.models import Playlist
+from video.models import Video
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -396,21 +398,42 @@ class ThumbValidator:
         self.task = task
 
     def validate(self):
-        """validate all indexes"""
-        for index in self.INDEX:
-            total = self._get_total(index["name"])
-            if not total:
-                continue
-
-            paginate = IndexPaginate(
-                index_name=index["name"],
-                data=index["data"],
-                size=1000,
-                callback=ValidatorCallback,
-                task=self.task,
-                total=total,
-            )
-            _ = paginate.get_results()
+        for model, query in (
+            (Video, Video.objects.filter(active=True)),
+            (Channel, Channel.objects.filter(active=True)),
+            (Playlist, Playlist.objects.filter(active=True)),
+            (Download, Download.objects.filter(status="pending")),
+        ):
+            if model is Video or model is Download:
+                rows = query.iterator(chunk_size=1000)
+                for row in rows:
+                    data = {
+                        "youtube_id": row.pk,
+                        "vid_thumb_url": row.metadata.get("vid_thumb_url"),
+                    }
+                    ThumbManager(row.pk).download_video_thumb(
+                        data["vid_thumb_url"], skip_existing=True
+                    )
+            elif model is Channel:
+                for row in query.iterator(chunk_size=1000):
+                    ThumbManager(
+                        row.pk, item_type="channel"
+                    ).download_channel_art(
+                        (
+                            row.metadata.get("channel_thumb_url"),
+                            row.metadata.get("channel_banner_url"),
+                            row.metadata.get("channel_tvart_url"),
+                        ),
+                        skip_existing=True,
+                    )
+            else:
+                for row in query.iterator(chunk_size=1000):
+                    ThumbManager(
+                        row.pk, item_type="playlist"
+                    ).download_playlist_thumb(
+                        row.metadata.get("playlist_thumbnail"),
+                        skip_existing=True,
+                    )
 
     def clean_up(self):
         """clean up all thumbs"""
@@ -443,25 +466,24 @@ class ThumbValidator:
     @staticmethod
     def _get_vid_thumbs_should(video_folder: str) -> set[str]:
         """get indexed"""
-        should_list = [
-            {"prefix": {"youtube_id": {"value": video_folder.lower()}}},
-            {"prefix": {"youtube_id": {"value": video_folder.upper()}}},
-        ]
-        data = {
-            "query": {"bool": {"should": should_list}},
-            "_source": ["youtube_id"],
-        }
-        result = IndexPaginate("ta_video,ta_download", data).get_results()
-        thumbs_should = {i["youtube_id"] for i in result}
-
-        return thumbs_should
+        video_ids = Video.objects.filter(
+            id__istartswith=video_folder
+        ).values_list("id", flat=True)
+        download_ids = Download.objects.filter(
+            id__istartswith=video_folder
+        ).values_list("id", flat=True)
+        return set(video_ids) | set(download_ids)
 
     def _clean_up_channels(self):
         """clean unneeded channel thumbs"""
         channel_dir = os.path.join(EnvironmentSettings.CACHE_DIR, "channels")
         channel_art = os.listdir(channel_dir)
         thumbs_is = {"_".join(i.split("_")[:-1]) for i in channel_art}
-        to_delete = is_missing(list(thumbs_is), "ta_channel", "channel_id")
+        to_delete = thumbs_is - set(
+            Channel.objects.filter(pk__in=thumbs_is).values_list(
+                "pk", flat=True
+            )
+        )
         for channel_thumb in channel_art:
             if channel_thumb[:24] in to_delete:
                 delete_path = os.path.join(channel_dir, channel_thumb)
@@ -481,7 +503,11 @@ class ThumbValidator:
         playlist_dir = os.path.join(EnvironmentSettings.CACHE_DIR, "playlists")
         playlist_art = os.listdir(playlist_dir)
         thumbs_is = {i.split(".")[0] for i in playlist_art}
-        to_delete = is_missing(list(thumbs_is), "ta_playlist", "playlist_id")
+        to_delete = thumbs_is - set(
+            Playlist.objects.filter(pk__in=thumbs_is).values_list(
+                "pk", flat=True
+            )
+        )
         for playlist_id in to_delete:
             delete_path = os.path.join(playlist_dir, f"{playlist_id}.jpg")
             os.remove(delete_path)
@@ -495,14 +521,6 @@ class ThumbValidator:
             if self.task:
                 self.task.send_progress([message])
 
-    @staticmethod
-    def _get_total(index_name):
-        """get total documents in index"""
-        path = f"{index_name}/_count"
-        response, _ = ElasticWrap(path).get()
-
-        return response.get("count")
-
 
 class ThumbFilesystem:
     """sync thumbnail files to media files"""
@@ -513,27 +531,11 @@ class ThumbFilesystem:
         self.task = task
 
     def embed(self):
-        """entry point"""
-        data = {
-            "query": {"match_all": {}},
-            "_source": ["media_url", "youtube_id", "channel.channel_id"],
-        }
-        paginate = IndexPaginate(
-            index_name=self.INDEX_NAME,
-            data=data,
-            size=100,
-            callback=EmbedCallback,
-            task=self.task,
-            total=self._get_total(),
-        )
-        _ = paginate.get_results()
-
-    def _get_total(self):
-        """get total documents in index"""
-        path = f"{self.INDEX_NAME}/_count"
-        response, _ = ElasticWrap(path).get()
-
-        return response.get("count")
+        """Embed thumbnails from archived videos."""
+        EmbedCallback(
+            Video.objects.order_by("pk").iterator(chunk_size=100),
+            self.INDEX_NAME,
+        ).run()
 
 
 class EmbedCallback:
@@ -548,6 +550,7 @@ class EmbedCallback:
 
     def run(self):
         """run embed"""
+        from common.src.domain import video_data
+
         for video in self.source:
-            video_id = video["_source"]["youtube_id"]
-            ThumbManager(video_id).embed_video_art(video["_source"])
+            ThumbManager(video.pk).embed_video_art(video_data(video))

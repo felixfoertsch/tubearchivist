@@ -55,7 +55,7 @@ class EmbeddingTests(unittest.TestCase):
             video = self.make_video(mode)
             with patch.object(video, "_embed_text_data") as text, patch.object(
                 video, "_embed_artwork"
-            ) as art, patch.object(video, "get_from_es") as fetch:
+            ) as art, patch.object(video, "get_from_db") as fetch:
                 video.embed_metadata(from_download=from_download)
                 text.assert_not_called()
                 art.assert_not_called()
@@ -100,7 +100,7 @@ class EmbeddingTests(unittest.TestCase):
         """Simple must not re-embed queue entries or add dynamic chapters."""
         postprocess = object.__new__(DownloadPostProcess)
         postprocess.config = {"downloads": {"add_metadata": "simple"}}
-        with patch("download.src.yt_dlp_handler.RedisQueue") as queue:
+        with patch("download.src.yt_dlp_handler.RuntimeQueue") as queue:
             postprocess.embed_metadata()
             queue.assert_not_called()
         downloader = object.__new__(VideoDownloader)

@@ -148,7 +148,6 @@ class SponsorBlock:
 class YoutubeVideo(YouTubeItem, YoutubeSubtitle):
     """represents a single youtube video"""
 
-    es_path = False
     index_name = "ta_video"
     yt_base = "https://www.youtube.com/watch?v="
 
@@ -331,7 +330,7 @@ class YoutubeVideo(YouTubeItem, YoutubeSubtitle):
     def delete_media_file(self):
         """delete video file, meta data"""
         print(f"{self.youtube_id}: delete video")
-        self.get_from_es()
+        self.get_from_db()
         if not self.json_data:
             raise FileNotFoundError
 
@@ -344,7 +343,7 @@ class YoutubeVideo(YouTubeItem, YoutubeSubtitle):
             print(f"{self.youtube_id}: failed {media_url}, continue.")
 
         self.del_in_playlists()
-        self.del_in_es()
+        self.delete_from_db()
         self.delete_subtitles()
         self.delete_comments()
 
@@ -357,7 +356,7 @@ class YoutubeVideo(YouTubeItem, YoutubeSubtitle):
         for playlist_id in all_playlists:
             print(f"{playlist_id}: delete video {self.youtube_id}")
             playlist = ta_playlist.YoutubePlaylist(playlist_id)
-            playlist.get_from_es()
+            playlist.get_from_db()
             entries = playlist.json_data["playlist_entries"]
             for idx, entry in enumerate(entries):
                 if entry["youtube_id"] == self.youtube_id:
@@ -366,7 +365,7 @@ class YoutubeVideo(YouTubeItem, YoutubeSubtitle):
                     )
                     if playlist.json_data["playlist_type"] == "custom":
                         playlist.del_video(self.youtube_id)
-            playlist.upload_to_es()
+            playlist.save_to_db()
 
     def delete_subtitles(self, subtitles=False):
         """delete indexed subtitles"""
@@ -447,7 +446,7 @@ class YoutubeVideo(YouTubeItem, YoutubeSubtitle):
         if mode is not True and not (mode == "simple" and from_download):
             return
         if not self.json_data:
-            self.get_from_es()
+            self.get_from_db()
 
         if not self.json_data:
             print(f"{self.youtube_id}: skip embed, video not indexed")
@@ -493,18 +492,18 @@ class YoutubeVideo(YouTubeItem, YoutubeSubtitle):
         """get metadata json str to embed"""
         comments = None
         if self.json_data.get("comment_count"):
-            comments = Comments(self.youtube_id).get_es_comments()
+            comments = Comments(self.youtube_id).get_comments()
 
         subtitles = None
         if self.json_data.get("subtitles"):
-            subtitles = YoutubeSubtitle(video=self).get_es_subtitles()
+            subtitles = YoutubeSubtitle(video=self).get_saved_subtitles()
 
         playlists = None
         if self.json_data.get("playlist"):
             playlists = []
             for playlist_id in self.json_data["playlist"]:
                 playlist = ta_playlist.YoutubePlaylist(playlist_id)
-                playlist.get_from_es()
+                playlist.get_from_db()
                 playlists.append(playlist.json_data)
 
         to_embed = json.dumps(
@@ -530,7 +529,7 @@ def index_new_video(youtube_id, video_type=VideoTypeEnum.VIDEOS):
     from appsettings.src.reindex import Reindex
 
     video = YoutubeVideo(youtube_id, video_type=video_type)
-    video.get_from_es(print_error=False)
+    video.get_from_db(print_error=False)
     if video.json_data:
         # reindex only for force redownload
         video = Reindex().reindex_single_video(
@@ -543,9 +542,10 @@ def index_new_video(youtube_id, video_type=VideoTypeEnum.VIDEOS):
     if not video.json_data:
         raise ValueError("failed to get metadata for " + youtube_id)
 
-    video.check_subtitles()
     url = video.json_data["vid_thumb_url"]
     ThumbManager(item_id=video.youtube_id).download_video_thumb(url=url)
-    video.upload_to_es()
+    video.save_to_db()
+    video.check_subtitles()
+    video.save_to_db()
 
     return video.json_data

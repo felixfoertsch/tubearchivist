@@ -1,278 +1,172 @@
-"""
-Functionality:
-- Handle json zip file based backup
-- create backup
-- restore backup
-"""
+"""PostgreSQL backups are managed with native pg_dump tools offline."""
 
-import json
 import os
 import re
-import zipfile
-from datetime import datetime
+import subprocess
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
 
 from common.src.env_settings import EnvironmentSettings
-from common.src.es_connect import ElasticWrap, IndexPaginate
-from common.src.helper import get_mapping, ignore_filelist
-from task.models import CustomPeriodicTask
 
 
-class ElasticBackup:
-    """dump index to nd-json files for later bulk import"""
+class PostgreSQLBackup:
+    """Create native custom-format PostgreSQL backups."""
 
-    INDEX_SIZE_CONF = {
-        "comment": 100,
-        "subtitle": 10000,
-    }
-    CACHE_DIR = EnvironmentSettings.CACHE_DIR
-    BACKUP_DIR = os.path.join(CACHE_DIR, "backup")
+    BACKUP_DIR = Path(EnvironmentSettings.CACHE_DIR) / "backup"
+    FILENAME = re.compile(
+        r"^ta_backup-[0-9]{8}T[0-9]{6}Z-(auto|manual|update)\.dump$"
+    )
 
-    def __init__(self, reason=False, task=False) -> None:
-        self.timestamp = datetime.now().strftime("%Y%m%d")
-        self.index_config = get_mapping()
+    def __init__(self, reason=False, task=False):
         self.reason = reason
         self.task = task
 
-    def backup_all_indexes(self):
-        """backup all indexes, add reason to init"""
-        print("backup all indexes")
-        if not self.reason:
-            raise ValueError("missing backup reason in ElasticBackup")
-
-        if self.task:
-            self.task.send_progress(["Scanning your index."])
-        for index in self.index_config:
-            index_name = index["index_name"]
-            print(f"backup: export in progress for {index_name}")
-            if not self.index_exists(index_name):
-                print(f"skip backup for not yet existing index {index_name}")
-                continue
-
-            self.backup_index(index_name)
-
-        if self.task:
-            self.task.send_progress(["Compress files to zip archive."])
-        self.zip_it()
-        if self.reason == "auto":
-            self.rotate_backup()
-
-    def backup_index(self, index_name):
-        """export all documents of a single index"""
-        paginate_kwargs = {
-            "data": {"query": {"match_all": {}}},
-            "keep_source": True,
-            "callback": BackupCallback,
-            "task": self.task,
-            "total": self._get_total(index_name),
-            "timeout": 30,
-        }
-
-        if size_overwrite := self.INDEX_SIZE_CONF.get(index_name):
-            paginate_kwargs.update({"size": size_overwrite})
-
-        paginate = IndexPaginate(f"ta_{index_name}", **paginate_kwargs)
-        _ = paginate.get_results()
-
-    @staticmethod
-    def _get_total(index_name):
-        """get total documents in index"""
-        path = f"ta_{index_name}/_count"
-        response, _ = ElasticWrap(path).get()
-
-        return response.get("count")
-
-    def zip_it(self):
-        """pack it up into single zip file"""
-        file_name = f"ta_backup-{self.timestamp}-{self.reason}.zip"
-
-        to_backup = []
-        for file in os.listdir(self.BACKUP_DIR):
-            if file.endswith(".json"):
-                to_backup.append(os.path.join(self.BACKUP_DIR, file))
-
-        backup_file = os.path.join(self.BACKUP_DIR, file_name)
-
-        comp = zipfile.ZIP_DEFLATED
-        with zipfile.ZipFile(backup_file, "w", compression=comp) as zip_f:
-            for backup_file in to_backup:
-                zip_f.write(backup_file, os.path.basename(backup_file))
-
-        # cleanup
-        for backup_file in to_backup:
-            os.remove(backup_file)
-
-    def post_bulk_restore(self, file_name):
-        """send bulk to es"""
-        with open(file_name, "r", encoding="utf-8") as f:
-            data = f.read()
-
-        if not data.strip():
-            return
-
-        _, _ = ElasticWrap("_bulk").post(data=data, ndjson=True)
+    def create_backup(self):
+        if not isinstance(self.reason, str) or self.reason not in {
+            "auto",
+            "manual",
+            "update",
+        }:
+            raise ValueError("backup reason must be auto, manual, or update")
+        version = subprocess.run(
+            ["pg_dump", "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+        if not re.search(r"\b18(?:\.\d+)?\b", version):
+            raise RuntimeError(
+                f"PostgreSQL 18 pg_dump required; found {version!r}"
+            )
+        self.BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        with tempfile.NamedTemporaryFile(
+            dir=self.BACKUP_DIR,
+            prefix=f".{stamp}.",
+            suffix=".dump",
+            delete=False,
+        ) as temporary:
+            temp_path = Path(temporary.name)
+        target = self.BACKUP_DIR / f"ta_backup-{stamp}-{self.reason}.dump"
+        env = os.environ.copy()
+        env["PGPASSWORD"] = EnvironmentSettings.POSTGRES_PASSWORD
+        command = [
+            "pg_dump",
+            "--format=custom",
+            "--no-owner",
+            "--no-acl",
+            "--host",
+            EnvironmentSettings.POSTGRES_HOST,
+            "--port",
+            str(EnvironmentSettings.POSTGRES_PORT),
+            "--username",
+            EnvironmentSettings.POSTGRES_USER,
+            "--dbname",
+            EnvironmentSettings.POSTGRES_DB,
+            "--file",
+            str(temp_path),
+        ]
+        try:
+            subprocess.run(command, env=env, check=True, timeout=3600)
+            if not temp_path.is_file() or not temp_path.stat().st_size:
+                raise RuntimeError(
+                    "pg_dump completed without producing a non-empty backup"
+                )
+            os.link(temp_path, target)
+            temp_path.unlink()
+            if self.reason == "auto":
+                self.rotate_backup()
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
+        return str(target)
 
     def get_all_backup_files(self):
-        """build all available backup files for view"""
-        all_backup_files = ignore_filelist(os.listdir(self.BACKUP_DIR))
-        all_available_backups = [
-            i
-            for i in all_backup_files
-            if i.startswith("ta_") and i.endswith(".zip")
+        self.BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        return [
+            data
+            for path in sorted(self.BACKUP_DIR.iterdir(), reverse=True)
+            if (data := self.build_backup_file_data(path.name))
         ]
-        all_available_backups.sort(reverse=True)
-
-        backup_dicts = []
-        for filename in all_available_backups:
-            data = self.build_backup_file_data(filename)
-            backup_dicts.append(data)
-
-        return backup_dicts
 
     def build_backup_file_data(self, filename):
-        """build metadata of single backup file"""
-        file_path = os.path.join(self.BACKUP_DIR, filename)
-        if not os.path.exists(file_path):
+        if not isinstance(filename, str) or not self.FILENAME.fullmatch(
+            filename
+        ):
             return False
-
-        file_split = filename.split("-")
-        if len(file_split) == 2:
-            timestamp = file_split[1].strip(".zip")
-            reason = False
-        elif len(file_split) == 3:
-            timestamp = file_split[1]
-            reason = file_split[2].strip(".zip")
-        else:
-            raise ValueError
-
-        data = {
+        path = self.BACKUP_DIR / filename
+        if not path.is_file() or path.is_symlink():
+            return False
+        stamp, reason = (
+            filename.removeprefix("ta_backup-")
+            .removesuffix(".dump")
+            .rsplit("-", 1)
+        )
+        return {
             "filename": filename,
-            "file_path": file_path,
-            "file_size": os.path.getsize(file_path),
-            "timestamp": timestamp,
+            "file_path": str(path),
+            "file_size": path.stat().st_size,
+            "timestamp": stamp,
             "reason": reason,
         }
 
-        return data
-
-    def restore(self, filename):
-        """
-        restore from backup zip file
-        call reset from ElasticIndexWrap first to start blank
-        """
-        zip_content = self._unpack_zip_backup(filename)
-        zip_content.sort()
-        self._restore_json_files(zip_content)
-
-    def _unpack_zip_backup(self, filename):
-        """extract backup zip and return filelist"""
-        file_path = os.path.join(self.BACKUP_DIR, filename)
-
-        with zipfile.ZipFile(file_path, "r") as z:
-            zip_content = z.namelist()
-            z.extractall(self.BACKUP_DIR)
-
-        return zip_content
-
-    def _restore_json_files(self, zip_content):
-        """go through the unpacked files and restore"""
-        for idx, json_f in enumerate(zip_content):
-            self._notify_restore(idx, json_f, len(zip_content))
-            file_name = os.path.join(self.BACKUP_DIR, json_f)
-
-            if not json_f.startswith("es_") or not json_f.endswith(".json"):
-                os.remove(file_name)
-                continue
-
-            print("restoring: " + json_f)
-            self.post_bulk_restore(file_name)
-            os.remove(file_name)
-
-    def _notify_restore(self, idx, json_f, total_files):
-        """notify restore progress"""
-        message = [f"Restore index from json backup file {json_f}."]
-        progress = (idx + 1) / total_files
-        self.task.send_progress(message_lines=message, progress=progress)
-
-    @staticmethod
-    def index_exists(index_name):
-        """check if index already exists to skip"""
-        _, status_code = ElasticWrap(f"ta_{index_name}").get()
-        exists = status_code == 200
-
-        return exists
-
     def rotate_backup(self):
-        """delete old backups if needed"""
+        """Rotate automatic dumps only when schedule sets a positive limit."""
+        from django.apps import apps
+        from django.core.exceptions import AppRegistryNotReady
+
         try:
-            task = CustomPeriodicTask.objects.get(name="run_backup")
-        except CustomPeriodicTask.DoesNotExist:
+            schedule_model = apps.get_model("task", "CustomPeriodicTask")
+        except (LookupError, AppRegistryNotReady):
             return
-
-        rotate = task.task_config.get("rotate")
-        if not rotate:
+        try:
+            schedule = schedule_model.objects.get(name="run_backup")
+        except schedule_model.DoesNotExist:
             return
-
-        all_backup_files = self.get_all_backup_files()
-        auto = [i for i in all_backup_files if i["reason"] == "auto"]
-
-        if len(auto) <= rotate:
-            print("no backup files to rotate")
+        rotate = schedule.task_config.get("rotate")
+        if (
+            not isinstance(rotate, int)
+            or isinstance(rotate, bool)
+            or rotate < 1
+        ):
             return
-
-        all_to_delete = auto[rotate:]
-        for to_delete in all_to_delete:
-            self.delete_file(to_delete["filename"])
+        automatic = sorted(
+            (
+                info
+                for info in self.get_all_backup_files()
+                if info["reason"] == "auto"
+            ),
+            key=lambda info: info["filename"],
+            reverse=True,
+        )
+        for info in automatic[rotate:]:
+            self.delete_file(info["filename"])
 
     def delete_file(self, filename):
-        """delete backup file"""
-        file_path = os.path.join(self.BACKUP_DIR, filename)
-        if not os.path.exists(file_path):
-            print(f"backup file not found: {filename}")
+        info = self.build_backup_file_data(filename)
+        if not info:
             return False
+        Path(info["file_path"]).unlink()
+        return info["file_path"]
 
-        print(f"remove old backup file: {file_path}")
-        os.remove(file_path)
-
-        return file_path
-
-
-class BackupCallback:
-    """handle backup ndjson writer as callback for IndexPaginate"""
-
-    def __init__(self, source, index_name, counter=0):
-        self.source = source
-        self.index_name = index_name
-        self.counter = counter
-        self.timestamp = datetime.now().strftime("%Y%m%d")
-        self.cache_dir = EnvironmentSettings.CACHE_DIR
-
-    def run(self):
-        """run the junk task"""
-        file_content = self._build_bulk()
-        self._write_es_json(file_content)
-
-    def _build_bulk(self):
-        """build bulk query data from all_results"""
-        bulk_list = []
-
-        for document in self.source:
-            document_id = document["_id"]
-            es_index = re.sub(r"_v\d+$", "", document["_index"])  # remove _v
-            action = {"index": {"_index": es_index, "_id": document_id}}
-            source = document["_source"]
-            bulk_list.append(json.dumps(action))
-            bulk_list.append(json.dumps(source))
-
-        # add last newline
-        bulk_list.append("\n")
-        file_content = "\n".join(bulk_list)
-
-        return file_content
-
-    def _write_es_json(self, file_content):
-        """write nd-json file for es _bulk API to disk"""
-        index = self.index_name.lstrip("ta_")
-        file_name = f"es_{index}-{self.timestamp}-{self.counter}.json"
-        file_path = os.path.join(self.cache_dir, "backup", file_name)
-        with open(file_path, "a+", encoding="utf-8") as f:
-            f.write(file_content)
+    def restore(self, filename):
+        if not isinstance(filename, str) or not self.FILENAME.fullmatch(
+            filename
+        ):
+            raise ValueError(
+                "Legacy archives are unsupported; select a native PostgreSQL "
+                ".dump backup"
+            )
+        command = (
+            "docker compose run --rm --no-deps tubearchivist "
+            "python manage.py ta_restore_backup "
+            f"{filename} --target-database "
+            f"{EnvironmentSettings.POSTGRES_DB} --quiesced"
+        )
+        raise RuntimeError(
+            "Web restore is disabled. Stop web and Procrastinate workers; "
+            "verify rollback backup, then run "
+            f"`{command}`."
+        )

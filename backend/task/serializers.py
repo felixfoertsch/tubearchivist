@@ -10,9 +10,13 @@ from task.src.task_config import TASK_CONFIG
 class CustomPeriodicTaskSerializer(serializers.ModelSerializer):
     """serialize CustomPeriodicTask"""
 
-    schedule = serializers.CharField(source="schedule_parsed")
-    schedule_human = serializers.CharField(source="crontab.human_readable")
-    last_run_at = serializers.DateTimeField()
+    schedule = serializers.CharField()
+    last_run_at = serializers.DateTimeField(allow_null=True)
+    schedule_human = serializers.SerializerMethodField()
+
+    def get_schedule_human(self, obj):
+        return obj.schedule
+
     config = serializers.DictField(source="task_config")
 
     class Meta:
@@ -27,7 +31,7 @@ class CustomPeriodicTaskSerializer(serializers.ModelSerializer):
 
 
 class TaskResultSerializer(serializers.Serializer):
-    """serialize task result stored in redis"""
+    """Serialize task result stored in PostgreSQL."""
 
     status = serializers.ChoiceField(
         choices=[

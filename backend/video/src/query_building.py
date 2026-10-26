@@ -1,154 +1,134 @@
-"""build query for video fetching"""
+"""Build PostgreSQL video-list querysets and validate legacy query options."""
 
-from common.src.ta_redis import RedisArchivist
-from playlist.src.index import YoutubePlaylist
-from video.src.constants import OrderEnum, SortEnum, VideoTypeEnum
+from common.src.runtime import RuntimeStore
+from django.db.models import Case, IntegerField, When
+from playlist.models import Playlist, PlaylistEntry
+from video.models import Video
+from video.src.constants import OrderEnum, SortEnum, VideoTypeEnum, WatchedEnum
 
 
 class QueryBuilder:
-    """contain functionality"""
-
-    WATCH_OPTIONS = ["watched", "unwatched", "continue"]
-
     def __init__(self, user_id: int, **kwargs):
         self.user_id = user_id
         self.request_params = kwargs
 
-    def build_data(self) -> dict:
-        """build data dict"""
-        data = {}
-        data["query"] = self.build_query()
-        if sort := self.parse_sort():
-            data.update(sort)
+    def build_data(self):
+        return {"queryset": self.build_query()}
 
-        return data
+    def build_query(self):
+        params = self.request_params
+        queryset = Video.objects.select_related("channel").all()
+        queryset = self._filter_channel(queryset, params)
+        queryset = self._filter_playlist(queryset, params)
+        queryset = self._filter_watch(queryset, params)
+        queryset = self._filter_type(queryset, params)
+        queryset = self._filter_height(queryset, params)
+        return self._sort(queryset, params)
 
-    def build_query(self) -> dict:
-        """build query key"""
-        must_list = []
-        channel = self.request_params.get("channel")
-        if channel:
-            must_list.append({"match": {"channel.channel_id": channel}})
+    @staticmethod
+    def _filter_channel(queryset, params):
+        if params.get("channel"):
+            return queryset.filter(channel_id=params["channel"])
+        return queryset
 
-        playlist = self.request_params.get("playlist")
-        if playlist:
-            must_list.append({"match": {"playlist.keyword": playlist}})
+    @staticmethod
+    def _filter_playlist(queryset, params):
+        if not params.get("playlist"):
+            return queryset
+        playlist = Playlist.objects.filter(pk=params["playlist"]).first()
+        if playlist is None:
+            return queryset.none()
+        entries = PlaylistEntry.objects.filter(playlist_id=params["playlist"])
+        ids = list(
+            entries.order_by("position").values_list("video_id", flat=True)
+        )
+        ordering = Case(
+            *[
+                When(pk=video_id, then=index)
+                for index, video_id in enumerate(ids)
+            ],
+            output_field=IntegerField(),
+        )
+        return queryset.filter(pk__in=ids).order_by(ordering, "pk")
 
-        watch = self.request_params.get("watch")
-        if watch is not None:
-            watch_must_list = self.parse_watch(watch)
-            must_list.append(watch_must_list)
-
-        video_type = self.request_params.get("type")
-        if video_type:
-            type_list_list = self.parse_type(video_type)
-            must_list.append(type_list_list)
-
-        height = self.request_params.get("height")
-        if height:
-            height_must = self.parse_height(height)
-            must_list.append(height_must)
-
-        query = {"bool": {"must": must_list}}
-
-        return query
-
-    def parse_watch(self, watch: str) -> dict:
-        """build query"""
-        if watch not in self.WATCH_OPTIONS:
-            raise ValueError(f"'{watch}' not in {self.WATCH_OPTIONS}")
-
-        if watch == "continue":
-            continue_must = self._build_continue_must()
-            return continue_must
-
-        return {"match": {"player.watched": watch == "watched"}}
-
-    def _build_continue_must(self):
-        results = RedisArchivist().list_items(f"{self.user_id}:progress:")
-        if not results:
-            return None
-
+    def _filter_watch(self, queryset, params):
+        if not params.get("watch"):
+            return queryset
+        watch = self.parse_watch(params["watch"])
+        if watch == "watched":
+            return queryset.filter(watched=True)
+        if watch == "unwatched":
+            return queryset.filter(watched=False)
         ids = [
-            {"match": {"youtube_id": i.get("youtube_id")}}
-            for i in results
-            if not i.get("watched")
+            item.get("youtube_id")
+            for item in RuntimeStore().list_items(f"{self.user_id}:progress:")
+            if item.get("youtube_id") and not item.get("watched")
         ]
-        if not ids:
-            return None
+        return queryset.filter(pk__in=ids) if ids else queryset.none()
 
-        return {"bool": {"should": ids}}
+    @classmethod
+    def _filter_type(cls, queryset, params):
+        if params.get("type"):
+            return queryset.filter(video_type=cls.parse_type(params["type"]))
+        return queryset
 
-    def parse_type(self, video_type: str):
-        """parse video type"""
-        if not hasattr(VideoTypeEnum, video_type.upper()):
-            raise ValueError(f"'{video_type}' not in VideoTypeEnum")
+    @staticmethod
+    def _filter_height(queryset, params):
+        if not params.get("height"):
+            return queryset
+        try:
+            height = int(params["height"])
+        except (TypeError, ValueError) as err:
+            raise ValueError("height must be an integer") from err
+        from django.db.models import Exists, OuterRef
 
-        vid_type = getattr(VideoTypeEnum, video_type.upper()).value
-
-        return {"match": {"vid_type": vid_type}}
-
-    def parse_height(self, height: str):
-        """parse height to int"""
-
-        return {"term": {"streams.height": {"value": height}}}
-
-    def parse_sort(self) -> dict | None:
-        """build sort key"""
-        playlist = self.request_params.get("playlist")
-        if playlist:
-            # overwrite sort based on idx in playlist
-            return self._get_playlist_sort(playlist_id=playlist)
-
-        sort = self.request_params.get("sort")
-        if not sort:
-            return None
-
-        if not hasattr(SortEnum, sort.upper()):
-            raise ValueError(f"'{sort}' not in SortEnum")
-
-        sort_field = getattr(SortEnum, sort.upper()).value
-
-        order = self.request_params.get("order", "desc")
-        if not hasattr(OrderEnum, order.upper()):
-            raise ValueError(f"'{order}' not in OrderEnum")
-
-        order_by = getattr(OrderEnum, order.upper()).value
-
-        return {"sort": [{sort_field: {"order": order_by}}]}
-
-    def _get_playlist_sort(self, playlist_id: str):
-        """get sort for playlist"""
-        playlist = YoutubePlaylist(playlist_id)
-        playlist.get_from_es()
-        if not playlist.json_data:
-            raise ValueError(f"playlist {playlist_id} not found")
-
-        sort_score = {
-            i["youtube_id"]: i["idx"]
-            for i in playlist.json_data["playlist_entries"]
-            if i["downloaded"]
-        }
-        script = (
-            "if(params.scores.containsKey(doc['youtube_id'].value)) "
-            + "{return params.scores[doc['youtube_id'].value];} "
-            + "return 100000;"
+        matches = Video.objects.filter(
+            pk=OuterRef("pk"), metadata__streams__contains=[{"height": height}]
+        )
+        return queryset.annotate(_has_height=Exists(matches)).filter(
+            _has_height=True
         )
 
-        sort = {
-            "sort": [
-                {
-                    "_script": {
-                        "type": "number",
-                        "script": {
-                            "lang": "painless",
-                            "source": script,
-                            "params": {"scores": sort_score},
-                        },
-                        "order": "asc",
-                    }
-                }
-            ],
-        }
+    def _sort(self, queryset, params):
+        if not params.get("sort") or params.get("playlist"):
+            return queryset
+        sort = self.parse_sort()
+        field, direction = next(iter(sort["sort"][0].items()))
+        lookup = {
+            "published": "published",
+            "date_downloaded": "downloaded_at",
+            "stats.view_count": "view_count",
+            "stats.like_count": "like_count",
+            "player.duration": "duration",
+            "media_size": "media_size",
+            "streams.width": "metadata__streams__width",
+            "streams.height": "metadata__streams__height",
+        }[field]
+        return queryset.order_by(
+            ("" if direction["order"] == "asc" else "-") + lookup, "pk"
+        )
 
-        return sort
+    @staticmethod
+    def parse_watch(watch):
+        if watch not in WatchedEnum.values():
+            raise ValueError(f"'{watch}' not in {WatchedEnum.values()}")
+        return watch
+
+    @staticmethod
+    def parse_type(video_type):
+        if video_type not in VideoTypeEnum.values_known():
+            raise ValueError(
+                f"'{video_type}' not in {VideoTypeEnum.values_known()}"
+            )
+        return video_type
+
+    def parse_sort(self):
+        sort = self.request_params.get("sort")
+        try:
+            sort = SortEnum[sort.upper()].value
+        except (KeyError, AttributeError) as error:
+            raise ValueError(f"'{sort}' not in SortEnum") from error
+        order = self.request_params.get("order", "desc")
+        if order not in OrderEnum.values():
+            raise ValueError(f"'{order}' not in {OrderEnum.values()}")
+        return {"sort": [{sort: {"order": order}}]}

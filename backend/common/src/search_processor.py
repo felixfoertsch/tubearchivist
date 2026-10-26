@@ -1,251 +1,178 @@
-"""
-Functionality:
-- processing search results for frontend
-- this is duplicated code from home.src.frontend.searching.SearchHandler
-"""
+"""Convert PostgreSQL-backed API results to existing frontend wire format."""
 
 import urllib.parse
 from pathlib import Path
 
-from common.src.helper import date_parser, get_duration_str
-from common.src.ta_redis import RedisArchivist
+from common.src.helper import date_parser
+from common.src.runtime import RuntimeStore
 from download.src.thumbnails import ThumbManager
 
 
 class SearchProcess:
-    """process search results"""
+    """Convert raw domain records at API presentation boundary."""
 
-    def __init__(self, response, match_video_user_progress: None | int = None):
+    def __init__(self, response, match_video_user_progress=None):
         self.response = response
-        self.processed = False
         self.position_index = self.get_user_progress(match_video_user_progress)
 
     def process(self):
-        """detect type and process"""
-        if "_source" in self.response.keys():
-            # single
-            self.processed = self._process_result(self.response)
+        if isinstance(self.response, list):
+            return [self._process_result(item) for item in self.response]
+        if isinstance(self.response, dict):
+            return self._process_result(self.response)
+        return self.response
 
-        elif "hits" in self.response.keys():
-            # multiple
-            self.processed = []
-            all_sources = self.response["hits"]["hits"]
-            for result in all_sources:
-                self.processed.append(self._process_result(result))
-
-        return self.processed
-
-    def get_user_progress(self, match_video_user_progress) -> dict | None:
-        """get user video watch progress"""
-        if not match_video_user_progress:
+    def get_user_progress(self, user_id):
+        if not user_id:
             return None
-
-        query = f"{match_video_user_progress}:progress:*"
-        all_positions = RedisArchivist().list_items(query)
-        if not all_positions:
-            return None
-
-        pos_index = {
-            i["youtube_id"]: i["position"]
-            for i in all_positions
-            if not i.get("watched")
+        positions = RuntimeStore().list_items(f"{user_id}:progress:")
+        return {
+            item["youtube_id"]: item["position"]
+            for item in positions
+            if item.get("youtube_id")
+            and "position" in item
+            and not item.get("watched")
         }
-        return pos_index
+
+    @staticmethod
+    def add_video_progress(item, user_id):
+        positions = (
+            RuntimeStore().list_items(f"{user_id}:progress:")
+            if user_id
+            else []
+        )
+        position = next(
+            (
+                row["position"]
+                for row in positions
+                if row.get("youtube_id") == item.get("youtube_id")
+                and not row.get("watched")
+            ),
+            None,
+        )
+        duration = item.get("player", {}).get("duration")
+        if position and duration:
+            item["player"].update(
+                progress=100 * position / duration, position=position
+            )
+        return item
 
     def _process_result(self, result):
-        """detect which type of data to process"""
-        index = result["_index"]
-        processed = False
+        wire = result.get("_source", result).copy()
+        index = result.get("_index", self._infer_index(wire))
         if index.startswith("ta_video"):
-            processed = self._process_video(result["_source"])
-        if index.startswith("ta_channel"):
-            processed = self._process_channel(result["_source"])
-        if index.startswith("ta_playlist"):
-            processed = self._process_playlist(result["_source"])
-        if index.startswith("ta_download"):
-            processed = self._process_download(result["_source"])
-        if index.startswith("ta_comment"):
-            processed = self._process_comment(result["_source"])
-        if index.startswith("ta_subtitle"):
-            processed = self._process_subtitle(result)
-
-        if isinstance(processed, dict):
+            processed = self._process_video(wire)
+        elif index.startswith("ta_channel"):
+            processed = self._process_channel(wire)
+        elif index.startswith("ta_playlist"):
+            processed = self._process_playlist(wire)
+        elif index.startswith("ta_subtitle"):
+            processed = self._process_subtitle(wire, result.get("highlight"))
+        else:
+            processed = wire
+        if isinstance(processed, dict) and (
+            "_index" in result or "_source" in result
+        ):
+            # SearchForm needs envelope for grouping and ranking.
             processed.update(
-                {
-                    "_index": index,
-                    "_score": round(result.get("_score") or 0, 2),
-                }
+                _index=index, _score=round(result.get("_score") or 0, 2)
             )
-
         return processed
 
     @staticmethod
-    def _process_channel(channel_dict):
-        """run on single channel"""
-        channel_id = channel_dict["channel_id"]
-        art_base = f"/media/thumb/channel/{channel_id}"
-        date_str = date_parser(channel_dict["channel_last_refresh"])
-        channel_dict.update(
-            {
-                "channel_last_refresh": date_str,
-                "channel_description": channel_dict.get("channel_description"),
-            }
-        )
-
-        if channel_dict.get("channel_banner_url"):
-            channel_dict["channel_banner_url"] = f"{art_base}/banner.jpg"
-        else:
-            channel_dict["channel_banner_url"] = None
-
-        if channel_dict.get("channel_thumb_url"):
-            channel_dict["channel_thumb_url"] = f"{art_base}/thumb.jpg"
-        else:
-            channel_dict["channel_thumb_url"] = None
-
-        if channel_dict.get("channel_tvart_url"):
-            channel_dict["channel_tvart_url"] = f"{art_base}/tvart.jpg"
-        else:
-            channel_dict["channel_tvart_url"] = None
-
-        return dict(sorted(channel_dict.items()))
-
-    def _process_video(self, video_dict):
-        """run on single video dict"""
-        video_id = video_dict["youtube_id"]
-        media_url = urllib.parse.quote(video_dict["media_url"])
-        vid_last_refresh = date_parser(video_dict["vid_last_refresh"])
-        published = date_parser(video_dict["published"])
-        channel = self._process_channel(video_dict["channel"])
-
-        if "subtitles" in video_dict:
-            for idx, _ in enumerate(video_dict["subtitles"]):
-                url = video_dict["subtitles"][idx]["media_url"]
-                subtitle_url = f"/media/subtitle/{url}"
-                video_dict["subtitles"][idx]["media_url"] = subtitle_url
-        else:
-            video_dict["subtitles"] = []
-
-        video_dict.update(
-            {
-                "channel": channel,
-                "media_url": f"/media/stream/{media_url}",
-                "vid_last_refresh": vid_last_refresh,
-                "published": published,
-                "vid_thumb_url": f"/media/thumb/video/{video_id}.jpg",
-                "description": video_dict.get("description"),
-            }
-        )
-
-        if self.position_index:
-            player_position = self.position_index.get(video_id)
-            total = video_dict["player"].get("duration")
-            if player_position and total:
-                progress = 100 * (player_position / total)
-                video_dict["player"].update(
-                    {
-                        "progress": progress,
-                        "position": player_position,
-                    }
-                )
-
-        if "playlist" not in video_dict:
-            video_dict["playlist"] = []
-
-        return dict(sorted(video_dict.items()))
-
-    def _process_playlist(self, playlist_dict):
-        """run on single playlist dict"""
-        playlist_last_refresh = date_parser(
-            playlist_dict["playlist_last_refresh"]
-        )
-        playlist_thumbnail = self._playlist_thumb_vid_check(playlist_dict)
-        description = playlist_dict.get("playlist_description")
-        playlist_dict.update(
-            {
-                "playlist_thumbnail": playlist_thumbnail,
-                "playlist_last_refresh": playlist_last_refresh,
-                "playlist_description": description,
-            }
-        )
-
-        return dict(sorted(playlist_dict.items()))
+    def _infer_index(data):
+        if "youtube_id" in data and "status" in data:
+            return "ta_download"
+        if "youtube_id" in data:
+            return "ta_video"
+        if "channel_id" in data:
+            return "ta_channel"
+        if "playlist_id" in data:
+            return "ta_playlist"
+        return "ta_subtitle"
 
     @staticmethod
-    def _playlist_thumb_vid_check(playlist_dict: dict):
-        """use first video in playlist if available
-        this is usually higher resolution"""
-        entries = playlist_dict.get("playlist_entries", [])
-        if len(entries) > 0 and entries[0]["downloaded"]:
-            first_vid_id = entries[0]["youtube_id"]
-            vid_path = ThumbManager(first_vid_id).vid_thumb_path(absolute=True)
-            if Path(vid_path).exists():
-                return f"/media/thumb/video/{first_vid_id}.jpg"
+    def _process_channel(data):
+        return _process_channel_wire(data)
 
-        return f"/media/thumb/playlist/{playlist_dict['playlist_id']}.jpg"
+    def _process_video(self, data):
+        data = data.copy()
+        video_id = data["youtube_id"]
+        media_url = data.get("media_url") or ""
+        data["media_url"] = f"/media/stream/{urllib.parse.quote(media_url)}"
+        data["vid_last_refresh"] = date_parser(data.get("vid_last_refresh"))
+        data["published"] = date_parser(data.get("published"))
+        data["vid_thumb_url"] = f"/media/thumb/video/{video_id}.jpg"
+        if "duration_str" not in data.get("player", {}):
+            from common.src.helper import get_duration_str
 
-    def _process_download(self, download_dict):
-        """run on single download item"""
-        vid_thumb_url = None
-        if download_dict.get("vid_thumb_url"):
-            video_id = download_dict["youtube_id"]
-            vid_thumb_path = Path(
-                ThumbManager(item_id=video_id).vid_thumb_path(absolute=True)
+            data.setdefault("player", {})["duration_str"] = get_duration_str(
+                data["player"].get("duration") or 0
             )
-            if vid_thumb_path.exists():
-                vid_thumb_url = f"/media/thumb/video/{video_id}.jpg"
-
-        download_dict.update(
-            {
-                "vid_thumb_url": vid_thumb_url,
-                "published": date_parser(download_dict["published"]),
-            }
+        streams = data.get("metadata", {}).get("streams")
+        if streams is not None:
+            data["streams"] = streams
+        data["category"] = data.get("metadata", {}).get(
+            "category", data.get("category", [])
         )
-        return dict(sorted(download_dict.items()))
+        channel = data.get("channel")
+        if isinstance(channel, dict) and "channel_id" in channel:
+            data["channel"] = self._process_channel(channel)
+        for subtitle in data.get("subtitles", []):
+            subtitle["media_url"] = f"/media/subtitle/{subtitle['media_url']}"
+        data.setdefault("subtitles", [])
+        data.setdefault("playlist", [])
+        if self.position_index:
+            position = self.position_index.get(video_id)
+            duration = data.get("player", {}).get("duration")
+            if position and duration:
+                data["player"].update(
+                    progress=100 * position / duration, position=position
+                )
+        return dict(sorted(data.items()))
 
-    def _process_comment(self, comment_dict):
-        """run on all comments, create reply thread"""
-        comment_tree = []
-        lookup = {}
-        for comment in comment_dict["comment_comments"]:
-            comment = comment.copy()
-            comment["comment_replies"] = []
-            lookup[comment["comment_id"]] = comment
+    @staticmethod
+    def _process_playlist(data):
+        data = data.copy()
+        data["playlist_last_refresh"] = date_parser(
+            data.get("playlist_last_refresh")
+        )
+        entries = data.get("playlist_entries", [])
+        thumbnail = f"/media/thumb/playlist/{data['playlist_id']}.jpg"
+        if entries and entries[0].get("downloaded"):
+            video_id = entries[0]["youtube_id"]
+            if Path(
+                ThumbManager(video_id).vid_thumb_path(absolute=True)
+            ).exists():
+                thumbnail = f"/media/thumb/video/{video_id}.jpg"
+        data["playlist_thumbnail"] = thumbnail
+        return dict(sorted(data.items()))
 
-        for comment in lookup.values():
-            parent = comment.get("comment_parent")
-            if parent == "root":
-                comment_tree.append(comment)
-            else:
-                parent_node = lookup.get(parent)
-                if parent_node:
-                    parent_node["comment_replies"].append(comment)
-
-        return comment_tree
-
-    def _process_subtitle(self, result):
-        """take complete result dict to extract highlight"""
-        subtitle_dict = result["_source"]
-        highlight = result.get("highlight")
+    @staticmethod
+    def _process_subtitle(data, highlight=None):
+        data = data.copy()
         if highlight:
-            # replace lines with the highlighted markdown
-            subtitle_line = highlight.get("subtitle_line")[0]
-            subtitle_dict.update({"subtitle_line": subtitle_line})
+            data["subtitle_line"] = highlight
+        data["vid_thumb_url"] = f"/media/thumb/video/{data['youtube_id']}.jpg"
+        return data
 
-        video_id = subtitle_dict["youtube_id"]
-        subtitle_dict.update(
-            {"vid_thumb_url": f"/media/thumb/video/{video_id}.jpg"}
+
+def _process_channel_wire(data):
+    data = data.copy()
+    channel_id = data["channel_id"]
+    data["channel_last_refresh"] = date_parser(
+        data.get("channel_last_refresh")
+    )
+    data.setdefault("channel_subs", 0)
+    data.setdefault("channel_tabs", ["videos"])
+    for key, name in (
+        ("channel_banner_url", "banner"),
+        ("channel_thumb_url", "thumb"),
+        ("channel_tvart_url", "tvart"),
+    ):
+        data[key] = (
+            f"/media/thumb/channel/{channel_id}/{name}.jpg"
+            if data.get(key)
+            else None
         )
-
-        return subtitle_dict
-
-
-def process_aggs(response):
-    """convert aggs duration to str"""
-
-    if response.get("aggregations"):
-        aggs = response["aggregations"]
-        if "total_duration" in aggs:
-            duration_sec = int(aggs["total_duration"]["value"])
-            aggs["total_duration"].update(
-                {"value_str": get_duration_str(duration_sec)}
-            )
+    return dict(sorted(data.items()))

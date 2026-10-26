@@ -7,20 +7,21 @@ functionality:
 import os
 from datetime import datetime
 
+from channel.models import Channel
 from channel.src.remote_query import get_last_channel_videos
 from common.src.env_settings import EnvironmentSettings
-from common.src.es_connect import ElasticWrap, IndexPaginate
 from common.src.helper import rand_sleep
 from common.src.index_generic import YouTubeItem
 from download.src.thumbnails import ThumbManager
 from download.src.yt_dlp_base import YtWrap
+from playlist.models import Playlist
+from video.models import Video
 from video.src.constants import VideoTypeEnum
 
 
 class YoutubeChannel(YouTubeItem):
     """represents a single youtube channel"""
 
-    es_path = False
     index_name = "ta_channel"
     yt_base = "https://www.youtube.com/channel/"
     yt_obs = {
@@ -35,7 +36,7 @@ class YoutubeChannel(YouTubeItem):
 
     def build_json(self, upload=False, fallback=False):
         """get from es or from youtube"""
-        self.get_from_es()
+        self.get_from_db()
         if self.json_data:
             return
 
@@ -57,7 +58,7 @@ class YoutubeChannel(YouTubeItem):
             self.get_channel_art()
 
         if upload:
-            self.upload_to_es()
+            self.save_to_db()
 
     def process_youtube_meta(self):
         """extract relevant fields"""
@@ -158,21 +159,8 @@ class YoutubeChannel(YouTubeItem):
 
     def sync_to_videos(self):
         """sync new channel_dict to all videos of channel"""
-        data = {
-            "query": {
-                "term": {"channel.channel_id": {"value": self.youtube_id}},
-            },
-            "script": {
-                "lang": "painless",
-                "params": {"channel": self.json_data},
-                "source": "ctx._source.channel = params.channel",
-            },
-        }
-        update_path = "ta_video/_update_by_query"
-        response, status_code = ElasticWrap(update_path).post(data)
-        if status_code not in [200, 201]:
-            print(f"sync to videos failed with status code {status_code}")
-            print(response)
+        channel = Channel.objects.get(pk=self.youtube_id)
+        Video.objects.filter(channel=channel).update(channel=channel)
 
     def change_subscribe(self, new_subscribe_state: bool):
         """change subscribe status"""
@@ -180,14 +168,14 @@ class YoutubeChannel(YouTubeItem):
             self.build_json()
 
         self.json_data["channel_subscribed"] = new_subscribe_state
-        self.upload_to_es()
+        self.save_to_db()
         self.sync_to_videos()
         return self.json_data
 
     def delete_channel(self):
         """delete channel and all videos"""
         print(f"{self.youtube_id}: delete channel")
-        self.get_from_es()
+        self.get_from_db()
         if not self.json_data:
             raise FileNotFoundError
 
@@ -196,7 +184,7 @@ class YoutubeChannel(YouTubeItem):
     def index_channel_playlists(self):
         """add all playlists of channel to index"""
         print(f"{self.youtube_id}: index all playlists")
-        self.get_from_es()
+        self.get_from_db()
         channel_name = self.json_data["channel_name"]
         self.task.send_progress([f"{channel_name}: Looking for Playlists"])
         self.get_all_playlists()
@@ -255,14 +243,12 @@ class YoutubeChannel(YouTubeItem):
 
     def get_channel_videos(self):
         """get all videos from channel"""
-        data = {
-            "query": {
-                "term": {"channel.channel_id": {"value": self.youtube_id}}
-            },
-            "_source": ["youtube_id", "vid_type"],
-        }
-        all_videos = IndexPaginate("ta_video", data).get_results()
-        return all_videos
+        from common.src.domain import video_data
+
+        return [
+            video_data(video)
+            for video in Video.objects.filter(channel_id=self.youtube_id)
+        ]
 
     def get_overwrites(self) -> dict:
         """get all per channel overwrites"""
@@ -321,10 +307,8 @@ class ChannelDelete(YouTubeItem):
         print(f"{self.youtube_id}: delete indexed playlists")
         self._delete_playlists()
         print(f"{self.youtube_id}: delete indexed videos")
-        self._delete_es_videos()
-        self._delete_es_comments()
-        self._delete_es_subtitles()
-        self.del_in_es()
+        Video.objects.filter(channel_id=self.youtube_id).delete()
+        self.delete_from_db()
 
     def _get_folder_path(self):
         """get folder where media files get stored"""
@@ -333,33 +317,6 @@ class ChannelDelete(YouTubeItem):
             self.json_data["channel_id"],
         )
         return folder_path
-
-    def _delete_es_videos(self):
-        """delete all channel documents from elasticsearch"""
-        data = {
-            "query": {
-                "term": {"channel.channel_id": {"value": self.youtube_id}}
-            }
-        }
-        _, _ = ElasticWrap("ta_video/_delete_by_query").post(data)
-
-    def _delete_es_comments(self):
-        """delete all comments from this channel"""
-        data = {
-            "query": {
-                "term": {"comment_channel_id": {"value": self.youtube_id}}
-            }
-        }
-        _, _ = ElasticWrap("ta_comment/_delete_by_query").post(data)
-
-    def _delete_es_subtitles(self):
-        """delete all subtitles from this channel"""
-        data = {
-            "query": {
-                "term": {"subtitle_channel_id": {"value": self.youtube_id}}
-            }
-        }
-        _, _ = ElasticWrap("ta_subtitle/_delete_by_query").post(data)
 
     def _delete_playlists(self):
         """delete all indexed playlist from es"""
@@ -371,16 +328,12 @@ class ChannelDelete(YouTubeItem):
 
     def _get_indexed_playlists(self, active_only=False):
         """get all indexed playlists from channel"""
-        must_list = [
-            {"term": {"playlist_channel_id": {"value": self.youtube_id}}}
-        ]
+        from common.src.domain import playlist_data
+
+        query = Playlist.objects.filter(channel_id=self.youtube_id)
         if active_only:
-            must_list.append({"term": {"playlist_active": {"value": True}}})
-
-        data = {"query": {"bool": {"must": must_list}}}
-
-        all_playlists = IndexPaginate("ta_playlist", data).get_results()
-        return all_playlists
+            query = query.filter(active=True)
+        return [playlist_data(playlist) for playlist in query]
 
 
 def channel_overwrites(channel_id, overwrites):
@@ -388,7 +341,7 @@ def channel_overwrites(channel_id, overwrites):
     channel = YoutubeChannel(channel_id)
     channel.build_json()
     channel.set_overwrites(overwrites)
-    channel.upload_to_es()
+    channel.save_to_db()
     channel.sync_to_videos()
 
     return channel.json_data

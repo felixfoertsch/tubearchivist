@@ -1,109 +1,92 @@
-"""
-functionality:
-- interact with in redis stored task results
-- handle threads and locks
-"""
+"""PostgreSQL-backed task state and commands."""
 
-from common.src.ta_redis import TaskRedis
-from task.celery import app as celery_app
+from task.models import JobState
 
 
 class TaskManager:
-    """manage tasks"""
+    """Read task lifecycle state persisted alongside Procrastinate jobs."""
 
     def get_all_results(self):
-        """return all task results"""
-        handler = TaskRedis()
-        all_keys = handler.get_all()
-        if not all_keys:
-            return False
-
-        return [handler.get_single(i) for i in all_keys]
+        return [self.as_dict(row) for row in JobState.objects.all()]
 
     def get_tasks_by_name(self, task_name):
-        """get all tasks by name"""
-        all_results = self.get_all_results()
-        if not all_results:
-            return False
-
-        return [i for i in all_results if i.get("name") == task_name]
+        return [
+            self.as_dict(row)
+            for row in JobState.objects.filter(name=task_name)
+        ]
 
     def get_task(self, task_id):
-        """get single task"""
-        return TaskRedis().get_single(task_id)
+        row = JobState.objects.filter(task_id=str(task_id)).first()
+        return self.as_dict(row) if row else None
+
+    @staticmethod
+    def as_dict(row):
+        from task.src.task_config import TASK_CONFIG
+
+        config = TASK_CONFIG[row.name]
+        progress = row.progress or {}
+        message = {
+            **config,
+            **progress,
+            "status": row.status,
+            "result": row.result,
+            "traceback": row.traceback,
+            "date_done": row.date_done.isoformat() if row.date_done else False,
+            "name": row.name,
+            "task_id": row.task_id,
+            "command": row.command,
+        }
+        return message
 
     def is_pending(self, task):
-        """check if task_name is pending, pass task object"""
-        tasks = self.get_tasks_by_name(task.name)
-        if not tasks:
-            return False
-
-        return bool([i for i in tasks if i.get("status") == "PENDING"])
+        return (
+            JobState.objects.filter(
+                name=task.name, status__in=["PENDING", "STARTED"]
+            )
+            .exclude(task_id=task.request.id)
+            .exists()
+        )
 
     def is_stopped(self, task_id):
-        """check if task_id has received STOP command"""
-        task = self.get_task(task_id)
-
-        return task.get("command") == "STOP"
+        return JobState.objects.filter(
+            task_id=str(task_id),
+            command="STOP",
+            status__in=["PENDING", "STARTED"],
+        ).exists()
 
     def get_pending(self, task_name):
-        """get all pending tasks of task_name"""
-        tasks = self.get_tasks_by_name(task_name)
-        if not tasks:
-            return False
-
-        return [i for i in tasks if i.get("status") == "PENDING"]
+        return [
+            row
+            for row in self.get_tasks_by_name(task_name)
+            if row["status"] in {"PENDING", "STARTED"}
+        ]
 
     def init(self, task):
-        """pass task object from bind task to set initial pending message"""
-        message = {
-            "status": "PENDING",
-            "result": None,
-            "traceback": None,
-            "date_done": False,
-            "name": task.name,
-            "task_id": task.request.id,
-        }
-        TaskRedis().set_key(task.request.id, message)
+        JobState.objects.update_or_create(
+            task_id=str(task.request.id),
+            defaults={"name": task.name, "status": "STARTED"},
+        )
 
     def fail_pending(self):
-        """
-        mark all pending as failed,
-        run at startup to recover from hard reset
-        """
-        all_results = self.get_all_results()
-        if not all_results:
-            return
+        """Leave stale-job recovery to Procrastinate worker heartbeat.
 
-        for result in all_results:
-            if result.get("status") == "PENDING":
-                result["status"] = "FAILED"
-                TaskRedis().set_key(result["task_id"], result, expire=True)
+        Procrastinate handles stale jobs through worker heartbeat recovery.
+        """
+        return None
 
 
 class TaskCommand:
-    """run commands on task"""
+    """Queue and cancel task jobs."""
 
-    def start(self, task_name, kwargs: dict | None = None):
-        """start task by task_name, only pass task that don't take args"""
-        task = celery_app.tasks.get(task_name).delay(**(kwargs or {}))
-        message = {
-            "task_id": task.id,
-            "status": task.status,
-            "task_name": task.name,
+    def start(self, task_name, kwargs=None):
+        from task.jobs import enqueue_task
+
+        task_id = enqueue_task(task_name, **(kwargs or {}))
+        return {
+            "task_id": str(task_id),
+            "status": "PENDING",
+            "task_name": task_name,
         }
 
-        return message
-
     def stop(self, task_id):
-        """
-        send stop signal to task_id,
-        needs to be implemented in task to take effect
-        """
-        print(f"[task][{task_id}]: received STOP signal.")
-        TaskRedis().set_command(task_id, "STOP")
-
-    def kill(self, task_id):
-        """send kill signal to task_id"""
-        print(f"[task][{task_id}]: received KILL signal.")
-        celery_app.control.revoke(task_id, terminate=True)
+        JobState.objects.filter(task_id=str(task_id)).update(command="STOP")

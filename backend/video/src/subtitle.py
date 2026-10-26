@@ -6,6 +6,7 @@ functionality:
 """
 
 import json
+import math
 import os
 import re
 from datetime import datetime
@@ -13,9 +14,10 @@ from operator import itemgetter
 from typing import TypedDict
 
 from common.src.env_settings import EnvironmentSettings
-from common.src.es_connect import ElasticWrap, IndexPaginate
 from common.src.helper import rand_sleep
+from django.db import transaction
 from download.src.yt_dlp_base import YtWrap
+from video.models import SubtitleFragment, Video
 from yt_dlp.utils import orderedSet_from_options
 
 
@@ -110,13 +112,101 @@ class YoutubeSubtitle:
         media_url = video_media_url.replace(".mp4", f".{lang}.vtt")
         return media_url
 
-    def get_es_subtitles(self) -> list[dict]:
-        """get subtitles from elastic"""
-        data = {
-            "query": {"term": {"youtube_id": {"value": self.video.youtube_id}}}
-        }
-        response = IndexPaginate("ta_subtitle", data).get_results()
-        return response
+    def get_saved_subtitles(self) -> list[dict]:
+        """Load saved subtitles in embedded metadata shape."""
+        video_id = getattr(self.video, "youtube_id", None) or self.video.pk
+        fragments = SubtitleFragment.objects.filter(video_id=video_id)
+        return [
+            {
+                **fragment.metadata,
+                "youtube_id": fragment.video_id,
+                "subtitle_lang": fragment.language,
+                "subtitle_source": fragment.source,
+                "subtitle_index": fragment.position,
+                "subtitle_start": SubtitleParser._ms_conv(
+                    fragment.start * 1000
+                ),
+                "subtitle_end": SubtitleParser._ms_conv(fragment.end * 1000),
+                "subtitle_line": fragment.text,
+                "subtitle_fragment_id": "-".join(
+                    map(
+                        str,
+                        (
+                            fragment.video_id,
+                            fragment.language,
+                            fragment.position,
+                        ),
+                    )
+                ),
+            }
+            for fragment in fragments
+        ]
+
+    @staticmethod
+    def _timestamp_seconds(value) -> float:
+        """Decode wire timestamps without changing their serialized form."""
+        try:
+            if isinstance(value, str) and ":" in value:
+                hours, minutes, seconds = value.split(":")
+                value = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+            seconds = float(value)
+        except (TypeError, ValueError) as err:
+            raise ValueError("invalid subtitle timestamp") from err
+        if not math.isfinite(seconds) or seconds < 0:
+            raise ValueError("invalid subtitle timestamp")
+        return seconds
+
+    @staticmethod
+    @transaction.atomic
+    def replace_subtitles(video, documents, lang: str, source: str) -> None:
+        """Replace one language/source only after validating every fragment."""
+        fragments = []
+        for document in documents:
+            if (
+                document.get("subtitle_lang") != lang
+                or document.get("subtitle_source") != source
+                or document.get("youtube_id") != video.pk
+            ):
+                raise ValueError("subtitle fragment identity mismatch")
+            position = document["subtitle_index"]
+            if not isinstance(position, int) or position < 1:
+                raise ValueError("subtitle index must be a positive integer")
+            start = YoutubeSubtitle._timestamp_seconds(
+                document["subtitle_start"]
+            )
+            end = YoutubeSubtitle._timestamp_seconds(document["subtitle_end"])
+            fragments.append(
+                SubtitleFragment(
+                    video=video,
+                    language=lang,
+                    source=source,
+                    position=position,
+                    start=start,
+                    end=end,
+                    text=document["subtitle_line"],
+                    metadata={
+                        key: value
+                        for key, value in document.items()
+                        if key
+                        not in {
+                            "subtitle_fragment_id",
+                            "youtube_id",
+                            "subtitle_lang",
+                            "subtitle_source",
+                            "subtitle_index",
+                            "subtitle_start",
+                            "subtitle_end",
+                            "subtitle_line",
+                        }
+                    },
+                )
+            )
+        if len({item.position for item in fragments}) != len(fragments):
+            raise ValueError("duplicate subtitle indices")
+        SubtitleFragment.objects.filter(
+            video=video, language=lang, source=source
+        ).delete()
+        SubtitleFragment.objects.bulk_create(fragments)
 
     def download_subtitles(self, relevant_subtitles):
         """download subtitle files to archive"""
@@ -147,9 +237,10 @@ class YoutubeSubtitle:
                 documents = parser.create_documents(self.video, source)
                 if any(doc["subtitle_line"].strip() for doc in documents):
                     # only proceed if actually anything to write
-                    query_str = parser.create_bulk_import(documents)
-                    self.delete_single_indexed(lang=lang)
-                    self.index_subtitle(query_str)
+                    video_obj = Video.objects.get(pk=self.video.youtube_id)
+                    self.replace_subtitles(
+                        video_obj, documents, lang=lang, source=source
+                    )
 
             indexed.append(
                 {
@@ -184,27 +275,6 @@ class YoutubeSubtitle:
         with open(dest_path, "w", encoding="utf-8") as subfile:
             subfile.write(subtitle_str)
 
-    @staticmethod
-    def index_subtitle(query_str):
-        """send subtitle to es for indexing"""
-        _, _ = ElasticWrap("_bulk").post(data=query_str, ndjson=True)
-
-    def delete_single_indexed(self, lang: str) -> None:
-        """delete single indexed lang, before reindexing"""
-        youtube_id = self.video.youtube_id
-        data = {
-            "query": {
-                "bool": {
-                    "must": [
-                        {"term": {"youtube_id": {"value": youtube_id}}},
-                        {"term": {"subtitle_lang": {"value": lang}}},
-                    ]
-                }
-            }
-        }
-        path = "ta_subtitle/_delete_by_query?refresh=true"
-        _, _ = ElasticWrap(path).post(data=data)
-
     def delete(self, subtitles=False):
         """delete subtitles from index and filesystem"""
         youtube_id = self.video.youtube_id
@@ -224,10 +294,7 @@ class YoutubeSubtitle:
                 os.remove(file_path)
             except FileNotFoundError:
                 print(f"{youtube_id}: {file_path} failed to delete")
-        # delete from index
-        path = "ta_subtitle/_delete_by_query?refresh=true"
-        data = {"query": {"term": {"youtube_id": {"value": youtube_id}}}}
-        _, _ = ElasticWrap(path).post(data=data)
+        SubtitleFragment.objects.filter(video_id=youtube_id).delete()
 
 
 class SubtitleParser:
@@ -255,9 +322,11 @@ class SubtitleParser:
                 print(f"skipping subtitle event without content: {event}")
                 continue
 
+            start_ms = float(event["tStartMs"])
+            duration_ms = float(event["dDurationMs"])
             cue = SubtitleCue(
-                start=self._ms_conv(event["tStartMs"]),
-                end=self._ms_conv(event["tStartMs"] + event["dDurationMs"]),
+                start=self._ms_conv(start_ms),
+                end=self._ms_conv(start_ms + duration_ms),
                 text="".join([i.get("utf8") for i in event["segs"]]),
                 idx=idx + 1,
             )
@@ -296,10 +365,11 @@ class SubtitleParser:
     @staticmethod
     def _ms_conv(ms):
         """convert ms to timestamp"""
-        hours = str((ms // (1000 * 60 * 60)) % 24).zfill(2)
-        minutes = str((ms // (1000 * 60)) % 60).zfill(2)
-        secs = str((ms // 1000) % 60).zfill(2)
-        millis = str(ms % 1000).zfill(3)
+        ms = float(ms)
+        hours = str(int(ms // (1000 * 60 * 60)) % 24).zfill(2)
+        minutes = str(int(ms // (1000 * 60)) % 60).zfill(2)
+        secs = str(int(ms // 1000) % 60).zfill(2)
+        millis = str(int(ms % 1000)).zfill(3)
 
         return f"{hours}:{minutes}:{secs}.{millis}"
 
@@ -313,21 +383,6 @@ class SubtitleParser:
             subtitle_str = subtitle_str + cue_text
 
         return subtitle_str
-
-    def create_bulk_import(self, documents):
-        """subtitle lines for es import"""
-        bulk_list = []
-
-        for document in documents:
-            document_id = document.get("subtitle_fragment_id")
-            action = {"index": {"_index": "ta_subtitle", "_id": document_id}}
-            bulk_list.append(json.dumps(action))
-            bulk_list.append(json.dumps(document))
-
-        bulk_list.append("\n")
-        query_str = "\n".join(bulk_list)
-
-        return query_str
 
     def create_documents(self, video, source):
         """process documents"""

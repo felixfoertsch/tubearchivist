@@ -59,20 +59,12 @@ class EnvironmentSettings:
     APP_DIR: str = str(environ.get("TA_APP_DIR", "/app"))
     CACHE_DIR: str = str(environ.get("TA_CACHE_DIR", "/cache"))
 
-    # Redis
-    REDIS_CON: str = str(environ.get("REDIS_CON"))
-    REDIS_NAME_SPACE: str = str(environ.get("REDIS_NAME_SPACE", "ta:"))
-
-    # ElasticSearch
-    ES_URL: str = str(environ.get("ES_URL"))
-    ES_PASS: str = get_password_from_file("ELASTIC_PASSWORD")
-    ES_USER: str = str(environ.get("ELASTIC_USER", "elastic"))
-    ES_SNAPSHOT_DIR: str = str(
-        environ.get(
-            "ES_SNAPSHOT_DIR", "/usr/share/elasticsearch/data/snapshot"
-        )
-    )
-    ES_DISABLE_VERIFY_SSL: bool = bool(environ.get("ES_DISABLE_VERIFY_SSL"))
+    # PostgreSQL
+    POSTGRES_HOST: str = str(environ.get("POSTGRES_HOST", "postgres"))
+    POSTGRES_PORT: int = int(environ.get("POSTGRES_PORT", "5432"))
+    POSTGRES_DB: str = str(environ.get("POSTGRES_DB", "ta_app"))
+    POSTGRES_USER: str = str(environ.get("POSTGRES_USER", "ta_app"))
+    POSTGRES_PASSWORD: str = get_password_from_file("POSTGRES_PASSWORD")
 
     def get_cache_root(self):
         """get root for web server"""
@@ -104,24 +96,17 @@ class EnvironmentSettings:
             APP_DIR: {self.APP_DIR}
             CACHE_DIR: {self.CACHE_DIR}""")
 
-    def print_redis_conf(self):
-        """debug redis conf paths"""
+    def print_postgres_conf(self):
+        """debug database endpoint without password"""
         print(f"""
-            REDIS_CON: {self.REDIS_CON}
-            REDIS_NAME_SPACE: {self.REDIS_NAME_SPACE}""")
-
-    def print_es_paths(self):
-        """debug es conf"""
-        print(f"""
-            ES_URL: {self.ES_URL}
-            ES_PASS: *****
-            ES_USER: {self.ES_USER}
-            ES_SNAPSHOT_DIR: {self.ES_SNAPSHOT_DIR}
-            ES_DISABLE_VERIFY_SSL: {self.ES_DISABLE_VERIFY_SSL}""")
+            POSTGRES_HOST: {self.POSTGRES_HOST}
+            POSTGRES_PORT: {self.POSTGRES_PORT}
+            POSTGRES_DB: {self.POSTGRES_DB}
+            POSTGRES_USER: {self.POSTGRES_USER}
+            POSTGRES_PASSWORD: *****""")
 
     def print_all(self):
         """print all"""
         self.print_generic()
         self.print_paths()
-        self.print_redis_conf()
-        self.print_es_paths()
+        self.print_postgres_conf()

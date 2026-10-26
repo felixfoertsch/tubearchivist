@@ -4,7 +4,9 @@ from common.serializers import (
     AsyncTaskResponseSerializer,
     ErrorResponseSerializer,
 )
+from common.src.domain import download_data
 from common.views_base import AdminOnly, ApiBaseView
+from download.models import Download
 from download.serializers import (
     AddToDownloadListSerializer,
     AddToDownloadQuerySerializer,
@@ -20,18 +22,39 @@ from download.serializers import (
 from download.src.queue_interact import PendingInteract
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework.response import Response
-from task.tasks import download_pending, extrac_dl
+from task.jobs import enqueue_task
 
 
 class DownloadApiListView(ApiBaseView):
+    model = Download
+    to_data = staticmethod(download_data)
     """resolves to /api/download/
     GET: returns latest videos in the download queue
     POST: add a list of videos to download queue
     DELETE: remove items based on query filter
     """
 
-    search_base = "ta_download/_search/"
     valid_filter = ["pending", "ignore"]
+
+    def get_queryset(self):
+        queryset = Download.objects.all()
+        params = getattr(self, "_filter_params", {})
+        if params.get("filter"):
+            queryset = queryset.filter(status=params["filter"])
+        if params.get("channel"):
+            queryset = queryset.filter(channel_id=params["channel"])
+        if params.get("vid_type"):
+            queryset = queryset.filter(video_type=params["vid_type"])
+        if params.get("q"):
+            queryset = queryset.filter(title__istartswith=params["q"])
+        if params.get("error") is not None:
+            queryset = (
+                queryset.filter(metadata__has_key="message")
+                if params["error"]
+                else queryset.exclude(metadata__has_key="message")
+            )
+        return queryset.order_by("timestamp", "pk")
+
     permission_classes = [AdminOnly]
 
     @extend_schema(
@@ -42,49 +65,11 @@ class DownloadApiListView(ApiBaseView):
     )
     def get(self, request):
         """get download queue list"""
-        query_filter = request.GET.get("filter", False)
-        self.data.update(
-            {
-                "sort": [
-                    {"auto_start": {"order": "desc"}},
-                    {"timestamp": {"order": "asc"}},
-                ],
-            }
-        )
-
         serializer = DownloadListQuerySerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
         validated_data = serializer.validated_data
 
-        must_list = []
-        query_filter = validated_data.get("filter")
-        if query_filter:
-            must_list.append({"term": {"status": {"value": query_filter}}})
-
-        filter_channel = validated_data.get("channel")
-        if filter_channel:
-            must_list.append(
-                {"term": {"channel_id": {"value": filter_channel}}}
-            )
-
-        vid_type_filter = validated_data.get("vid_type")
-        if vid_type_filter:
-            must_list.append(
-                {"term": {"vid_type": {"value": vid_type_filter}}}
-            )
-
-        search_query = validated_data.get("q")
-        if search_query:
-            must_list.append({"match_phrase_prefix": {"title": search_query}})
-
-        if validated_data.get("error") is not None:
-            operator = "must" if validated_data["error"] else "must_not"
-            must_list.append(
-                {"bool": {operator: [{"exists": {"field": "message"}}]}}
-            )
-
-        self.data["query"] = {"bool": {"must": must_list}}
-
+        self._filter_params = validated_data
         self.get_document_list(request)
         serializer = DownloadListSerializer(self.response)
 
@@ -125,13 +110,20 @@ class DownloadApiListView(ApiBaseView):
         pending = [i["youtube_id"] for i in to_add if i["status"] == "pending"]
         url_str = " ".join(pending)
         print(f"url_str: {url_str}")
-        task = extrac_dl.delay(
-            url_str, auto_start=auto_start, flat=flat, force=force
+        task_id = str(
+            enqueue_task(
+                "extract_download",
+                url_str,
+                auto_start=auto_start,
+                flat=flat,
+                force=force,
+            )
         )
 
         message = {
             "message": "add to queue task started",
-            "task_id": task.id,
+            "task_id": task_id,
+            "status": "PENDING",
         }
         response_serializer = AsyncTaskResponseSerializer(message)
 
@@ -166,7 +158,7 @@ class DownloadApiListView(ApiBaseView):
         )
 
         if new_status == "priority":
-            download_pending.delay(auto_only=True)
+            enqueue_task("download_pending", auto_only=True)
 
         return Response(status=204)
 
@@ -205,13 +197,14 @@ class DownloadApiListView(ApiBaseView):
 
 
 class DownloadApiView(ApiBaseView):
+    model = Download
+    to_data = staticmethod(download_data)
     """resolves to /api/download/<video_id>/
     GET: returns metadata dict of an item in the download queue
     POST: update status of item to pending or ignore
     DELETE: forget from download queue
     """
 
-    search_base = "ta_download/_doc/"
     valid_status = ["pending", "ignore", "ignore-force", "priority"]
     permission_classes = [AdminOnly]
 
@@ -262,7 +255,7 @@ class DownloadApiView(ApiBaseView):
         item_status = validated_data["status"]
 
         if item_status == "ignore-force":
-            extrac_dl.delay(video_id, status="ignore")
+            enqueue_task("extract_download", video_id, status="ignore")
             return Response(data_serializer.data)
 
         _, status_code = PendingInteract(video_id).get_item()
@@ -275,7 +268,7 @@ class DownloadApiView(ApiBaseView):
         print(f"{video_id}: change status to {item_status}")
         PendingInteract(video_id, item_status).update_status()
         if item_status == "priority":
-            download_pending.delay(auto_only=True)
+            enqueue_task("download_pending", auto_only=True)
 
         return Response(data_serializer.data)
 
@@ -303,7 +296,6 @@ class DownloadAggsApiView(ApiBaseView):
     GET: get download aggregations
     """
 
-    search_base = "ta_download/_search"
     valid_filter_view = ["ignore", "pending"]
 
     @extend_schema(
@@ -329,29 +321,35 @@ class DownloadAggsApiView(ApiBaseView):
                 message = f"invalid filter: {filter_view}"
                 return Response({"message": message}, status=400)
 
-            self.data.update(
-                {
-                    "query": {"term": {"status": {"value": filter_view}}},
-                }
-            )
+        from django.db.models import Count
 
-        self.data.update(
+        rows = Download.objects.all()
+        if filter_view:
+            rows = rows.filter(status=filter_view)
+        grouped = (
+            rows.values("channel_id", "metadata__channel_name")
+            .annotate(count=Count("id"))
+            .order_by("-count", "channel_id")[:30]
+        )
+        buckets = [
             {
-                "aggs": {
-                    "channel_downloads": {
-                        "multi_terms": {
-                            "size": 30,
-                            "terms": [
-                                {"field": "channel_name.keyword"},
-                                {"field": "channel_id"},
-                            ],
-                            "order": {"_count": "desc"},
-                        }
-                    }
-                }
+                "key": [
+                    row["metadata__channel_name"] or "",
+                    row["channel_id"],
+                ],
+                "key_as_string": "{}|{}".format(
+                    row["metadata__channel_name"] or "", row["channel_id"]
+                ),
+                "doc_count": row["count"],
+            }
+            for row in grouped
+        ]
+        serializer = DownloadAggsSerializer(
+            {
+                "doc_count_error_upper_bound": 0,
+                "sum_other_doc_count": 0,
+                "buckets": buckets,
             }
         )
-        self.get_aggs()
-        serializer = DownloadAggsSerializer(self.response["channel_downloads"])
 
         return Response(serializer.data)

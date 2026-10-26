@@ -1,30 +1,46 @@
-"""test playlist query building"""
+"""Native PostgreSQL playlist query building contracts."""
 
 import pytest
+from channel.models import Channel
+from playlist.models import Playlist
 from playlist.src.query_building import QueryBuilder
 
+pytestmark = pytest.mark.django_db
 
-def test_build_data():
-    """test for correct key building"""
-    qb = QueryBuilder(
-        channel="test_channel",
-        subscribed=True,
-        type="regular",
+
+def test_queryset_filters_and_ordering():
+    channel = Channel.objects.create(
+        id="playlist-query-channel", name="Channel"
     )
-    result = qb.build_data()
-    must_list = result["query"]["bool"]["must"]
-    assert "query" in result
-    assert "sort" in result
-    assert result["sort"] == [{"playlist_name.keyword": {"order": "asc"}}]
-    assert {"match": {"playlist_channel_id": "test_channel"}} in must_list
-    assert {"match": {"playlist_subscribed": True}} in must_list
+    regular = Playlist.objects.create(
+        id="playlist-regular",
+        channel_id=channel.pk,
+        name="Regular",
+        playlist_type="regular",
+        subscribed=True,
+    )
+    Playlist.objects.create(
+        id="playlist-custom",
+        channel_id=channel.pk,
+        name="Custom",
+        playlist_type="custom",
+        subscribed=False,
+    )
+    result = QueryBuilder(
+        channel="playlist-query-channel", subscribed=True, type="regular"
+    ).build_data()
+    assert list(result.values_list("pk", flat=True)) == [regular.pk]
+    assert list(
+        QueryBuilder(type="custom").build_data().values_list("pk", flat=True)
+    ) == ["playlist-custom"]
+    assert list(
+        QueryBuilder()
+        .build_data()
+        .order_by("name")
+        .values_list("name", flat=True)
+    ) == ["Custom", "Regular"]
 
 
-def test_parse_type():
-    """validate type"""
-    qb = QueryBuilder(type="regular")
+def test_invalid_playlist_type_rejected():
     with pytest.raises(ValueError):
-        qb.parse_type("invalid")
-
-    result = qb.parse_type("custom")
-    assert result == {"match": {"playlist_type": "custom"}}
+        QueryBuilder(type="invalid").build_data()

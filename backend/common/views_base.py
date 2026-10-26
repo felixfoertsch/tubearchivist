@@ -4,9 +4,7 @@ import logging
 import re
 
 from common.src.env_settings import EnvironmentSettings
-from common.src.es_connect import ElasticWrap
 from common.src.index_generic import Pagination
-from common.src.search_processor import SearchProcess, process_aggs
 from django.conf import settings
 from rest_framework import exceptions, permissions
 from rest_framework.authentication import (
@@ -36,7 +34,6 @@ class AdminWriteOnly(permissions.BasePermission):
     def has_permission(self, request, view):
         if request.method in permissions.SAFE_METHODS:
             return permissions.IsAuthenticated().has_permission(request, view)
-
         return check_admin(request.user)
 
 
@@ -50,12 +47,11 @@ class CsrfLoggingSessionAuthentication(SessionAuthentication):
             if settings.DEBUG:
                 DRF_LOGGER.warning(
                     "CSRF validation failed for path %r: %r. "
-                    "Set TA_HOST to the browser origin; trusted origins: %r",
+                    "Set TA_HOST to browser origin; trusted origins: %r",
                     request.path,
                     str(err.detail),
                     settings.CSRF_TRUSTED_ORIGINS,
                 )
-
             raise
 
 
@@ -67,68 +63,72 @@ class ApiBaseView(APIView):
         TokenAuthentication,
     ]
     permission_classes = [permissions.IsAuthenticated]
-    search_base = ""
-    data = ""
 
     def __init__(self):
         super().__init__()
         self.response = {}
-        self.data = {"query": {"match_all": {}}}
+        self.data = {}
         self.status_code = False
         self.context = False
         self.pagination_handler = False
 
-    def get_document(self, document_id, progress_match=None):
-        """get single document from es"""
-        path = f"{self.search_base}{document_id}"
-        response, status_code = ElasticWrap(path).get()
-        try:
-            self.response = SearchProcess(
-                response, match_video_user_progress=progress_match
-            ).process()
-        except KeyError:
-            print(f"item not found: {document_id}")
-
-        self.status_code = status_code
-
-    def initiate_pagination(self, request):
-        """set initial pagination values"""
-        self.pagination_handler = Pagination(request)
-        self.data.update(
-            {
-                "size": self.pagination_handler.pagination["page_size"],
-                "from": self.pagination_handler.pagination["page_from"],
-            }
+    def get_queryset(self):
+        """Return queryset declared by concrete API view."""
+        return (
+            self._queryset
+            if hasattr(self, "_queryset")
+            else self.model.objects.all()
         )
 
+    def get_document(self, document_id, progress_match=None):
+        """Load one ORM object and convert it to existing wire shape."""
+        obj = self.get_queryset().filter(pk=document_id).first()
+        self.response = self.to_data(obj) if obj is not None else {}
+        if self.response:
+            from common.src.search_processor import SearchProcess
+
+            self.response = SearchProcess(
+                self.response, progress_match
+            ).process()
+            self.response.pop("_index", None)
+            self.response.pop("_score", None)
+            if "stats" in self.response:
+                self.response["stats"].setdefault("average_rating", 0)
+        self.status_code = 200 if obj is not None else 404
+
+    def initiate_pagination(self, request):
+        self.pagination_handler = Pagination(request)
+
     def get_document_list(self, request, pagination=True, progress_match=None):
-        """get a list of results"""
+        """Paginate queryset; pagination window remains capped at 10,000."""
+        queryset = self.get_queryset()
         if pagination:
             self.initiate_pagination(request)
+            page = self.pagination_handler.pagination
+            total = min(queryset.count(), 10000)
+            self.pagination_handler.validate(total)
+            start = page["page_from"]
+            end = start + page["page_size"]
+            queryset = queryset.__getitem__(slice(start, end))
+        objects = list(queryset)
+        from common.src.search_processor import SearchProcess
 
-        es_handler = ElasticWrap(self.search_base)
-        response, status_code = es_handler.get(data=self.data)
         self.response["data"] = SearchProcess(
-            response, match_video_user_progress=progress_match
+            [self.to_data(obj) for obj in objects], progress_match
         ).process()
-        if self.response["data"]:
-            self.status_code = status_code
-        else:
-            self.status_code = 404
-
-        if pagination and response.get("hits"):
-            self.pagination_handler.validate(
-                response["hits"]["total"]["value"]
-            )
+        for item in self.response["data"]:
+            item.pop("_index", None)
+            item.pop("_score", None)
+            if "stats" in item:
+                item["stats"].setdefault("average_rating", 0)
+        self.status_code = 200 if self.response["data"] else 404
+        if pagination:
             self.response["paginate"] = self.pagination_handler.pagination
 
     def get_aggs(self):
-        """get aggs alone"""
-        self.data["size"] = 0
-        response, _ = ElasticWrap(self.search_base).get(data=self.data)
-        process_aggs(response)
-
-        self.response = response.get("aggregations")
+        raise NotImplementedError(
+            "Use a native database aggregation in this view"
+        )
 
 
 class StaticAuthBaseView(APIView):
@@ -145,13 +145,11 @@ class StaticAuthBaseView(APIView):
         if EnvironmentSettings.DISABLE_STATIC_AUTH
         else [CsrfLoggingSessionAuthentication, TokenAuthentication]
     )
-
     CACHE_CONTROL = (
         "public, max-age=3600"
         if EnvironmentSettings.DISABLE_STATIC_AUTH
         else "private, max-age=3600"
     )
-
     CHANNEL_ID_REG = re.compile(r"UC[A-Za-z0-9_-]{22}")
     CHANNEL_ART_REG = re.compile(r"banner|thumb|tvart")
     VIDEO_ID_REG = re.compile(r"[A-Za-z0-9_-]{11}")
@@ -159,26 +157,21 @@ class StaticAuthBaseView(APIView):
     SUBTITLE_LANG_REG = re.compile(r"[A-Za-z0-9_-]{2,10}")
 
     def validate_channel_id(self, channel_id: str) -> None:
-        """validate channel id"""
         if not self.CHANNEL_ID_REG.fullmatch(channel_id):
             raise ValueError("invalid channel ID")
 
     def validate_channel_art_type(self, channel_art: str) -> None:
-        """validate channel art type"""
         if not self.CHANNEL_ART_REG.fullmatch(channel_art):
             raise ValueError("invalid channel art type")
 
     def validate_video_id(self, video_id: str) -> None:
-        """validate video id"""
         if not self.VIDEO_ID_REG.fullmatch(video_id):
             raise ValueError("invalid video ID")
 
     def validate_playlist_id(self, playlist_id: str) -> None:
-        """validate playlist id"""
         if not self.PLAYLIST_ID_REG.fullmatch(playlist_id):
             raise ValueError("invalid playlist ID")
 
     def validate_subtitle_lang(self, lang: str) -> None:
-        """validate subtitle lang"""
         if not self.SUBTITLE_LANG_REG.fullmatch(lang):
             raise ValueError("invalid subtitle lang")

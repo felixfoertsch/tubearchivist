@@ -1,8 +1,11 @@
 """Bounded regular-video retention; failed fetches never grant deletion."""
 
+from channel.models import Channel
 from channel.src.remote_query import get_last_channel_videos
-from common.src.es_connect import ElasticWrap, IndexPaginate
+from common.src.domain import video_data
+from download.models import Download
 from download.src.queue import delete_and_ignore
+from video.models import Video
 from video.src.constants import VideoTypeEnum
 
 
@@ -52,14 +55,8 @@ class RollingWindow:
 
     def settings(self):
         """Read channel settings once per cleanup boundary."""
-        response, status = ElasticWrap(
-            f"ta_channel/_doc/{self.channel_id}"
-        ).get(print_error=False)
-        if status == 404 and response.get("found") is False:
-            return {}
-        if status != 200 or not isinstance(response.get("_source"), dict):
-            raise ValueError("Cannot verify rolling window settings")
-        return response["_source"].get("channel_overwrites", {})
+        channel = Channel.objects.filter(pk=self.channel_id).first()
+        return channel.overrides if channel else {}
 
     def enabled(self, settings):
         """Explicitly disabled regular subscriptions stay disabled."""
@@ -92,42 +89,18 @@ class RollingWindow:
         ):
             return
         targets = {entry["id"] for entry in entries}
-        pending = IndexPaginate(
-            "ta_download",
-            {
-                "query": {
-                    "bool": {
-                        "filter": [
-                            {"term": {"channel_id": self.channel_id}},
-                            {"term": {"status": "pending"}},
-                            {"term": {"vid_type": "videos"}},
-                        ]
-                    }
-                }
-            },
-            strict=True,
-        ).get_results()
+        pending = Download.objects.filter(
+            channel_id=self.channel_id, status="pending", video_type="videos"
+        ).exists()
         if pending or (self.task and self.task.is_stopped()):
             return
-        archived = IndexPaginate(
-            "ta_video",
-            {
-                "query": {
-                    "bool": {
-                        "filter": [
-                            {"term": {"channel.channel_id": self.channel_id}},
-                            {"term": {"vid_type": "videos"}},
-                        ]
-                    }
-                }
-            },
-            strict=True,
-        ).get_results()
+        archived = Video.objects.filter(
+            channel_id=self.channel_id, video_type="videos"
+        )
         delete_and_ignore(
             [
-                video
+                video_data(video)
                 for video in archived
-                if video["vid_type"] == "videos"
-                and video["youtube_id"] not in targets
+                if video.video_type == "videos" and video.pk not in targets
             ]
         )

@@ -475,7 +475,7 @@ class ManualImport:
             raise ValueError(message)
 
         video.check_subtitles(subtitle_files=self.current_video["subtitle"])
-        video.upload_to_es()
+        video.save_to_db()
 
         if video.offline_import and self.current_video["thumb"]:
             old_path = self.current_video["thumb"]

@@ -1,4 +1,4 @@
-"""tests for pagination and the Elasticsearch result window"""
+"""Tests for pagination and PostgreSQL's 10,000-result window."""
 
 # pylint: disable=redefined-outer-name
 

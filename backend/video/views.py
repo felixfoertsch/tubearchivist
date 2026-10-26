@@ -1,13 +1,15 @@
 """all API views for video endpoints"""
 
 from common.serializers import ErrorResponseSerializer
+from common.src.domain import video_data
 from common.src.helper import calc_is_watched
-from common.src.ta_redis import RedisArchivist
+from common.src.runtime import RuntimeStore
 from common.src.watched import WatchState
 from common.views_base import AdminWriteOnly, ApiBaseView
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from playlist.src.index import YoutubePlaylist
 from rest_framework.response import Response
+from video.models import Video, VideoComments
 from video.serializers import (
     CommentItemSerializer,
     PlayerSerializer,
@@ -22,6 +24,9 @@ from video.src.query_building import QueryBuilder
 
 
 class VideoApiListView(ApiBaseView):
+    model = Video
+    to_data = staticmethod(video_data)
+    is_video = True
     """resolves to /api/video/
     GET: returns list of videos
     params:
@@ -33,8 +38,6 @@ class VideoApiListView(ApiBaseView):
     - type:enum=videos|streams|shorts
     - height:int=px
     """
-
-    search_base = "ta_video/_search/"
 
     @extend_schema(
         parameters=[VideoListQuerySerializer()],
@@ -52,11 +55,8 @@ class VideoApiListView(ApiBaseView):
         validated_query = query_serializer.validated_data
 
         data = QueryBuilder(request.user.id, **validated_query).build_data()
-        if data == {"query": {"bool": {"must": [None]}}}:
-            # skip empty lookup
-            return Response([])
 
-        self.data = data
+        self._queryset = data["queryset"]
         self.get_document_list(request, progress_match=request.user.id)
 
         response_serializer = VideoListSerializer(self.response)
@@ -69,7 +69,9 @@ class VideoApiView(ApiBaseView):
     GET: returns metadata dict of video
     """
 
-    search_base = "ta_video/_doc/"
+    model = Video
+    to_data = staticmethod(video_data)
+    is_video = True
     permission_classes = [AdminWriteOnly]
 
     @extend_schema(
@@ -111,12 +113,12 @@ class VideoApiView(ApiBaseView):
 
 
 class VideoCommentView(ApiBaseView):
+    model = VideoComments
+    to_data = staticmethod(lambda obj: obj.comments)
     """resolves to /api/video/<video_id>/comment/
     handle video comments
     GET: return all comments from video with reply threads
     """
-
-    search_base = "ta_comment/_doc/"
 
     @extend_schema(
         responses={
@@ -129,22 +131,31 @@ class VideoCommentView(ApiBaseView):
     def get(self, request, video_id):
         """get video comments"""
         # pylint: disable=unused-argument
-        self.get_document(video_id)
-        if self.status_code == 404:
+        comment = VideoComments.objects.filter(pk=video_id).first()
+        if comment is None:
             error = ErrorResponseSerializer({"error": "video not found"})
             return Response(error.data, status=404)
-
-        serializer = CommentItemSerializer(self.response, many=True)
+        lookup = {}
+        for item in comment.comments:
+            lookup[item["comment_id"]] = {**item, "comment_replies": []}
+        roots = []
+        for item in lookup.values():
+            parent = item.get("comment_parent")
+            if parent == "root":
+                roots.append(item)
+            elif parent in lookup:
+                lookup[parent]["comment_replies"].append(item)
+        serializer = CommentItemSerializer(roots, many=True)
 
         return Response(serializer.data)
 
 
 class VideoApiNavView(ApiBaseView):
+    model = Video
+    to_data = staticmethod(video_data)
     """resolves to /api/video/<video-id>/nav/
     GET: returns playlist nav
     """
-
-    search_base = "ta_video/_doc/"
 
     @extend_schema(
         responses={
@@ -169,7 +180,7 @@ class VideoApiNavView(ApiBaseView):
 
         for playlist_id in self.response["playlist"]:
             playlist = YoutubePlaylist(playlist_id)
-            playlist.get_from_es()
+            playlist.get_from_db()
             playlist.build_nav(video_id)
             if playlist.nav:
                 playlist_nav.append(playlist.nav)
@@ -182,15 +193,16 @@ class VideoApiNavView(ApiBaseView):
 
 
 class VideoProgressView(ApiBaseView):
+    model = Video
+    to_data = staticmethod(video_data)
+
     """resolves to /api/video/<video_id>/progress/
     handle progress status for video
     """
 
-    search_base = "ta_video/_doc/"
-
     @staticmethod
     def _get_key(user_id: int, video_id: str) -> str:
-        """redis key"""
+        """PostgreSQL runtime key"""
         return f"{user_id}:progress:{video_id}"
 
     @extend_schema(
@@ -203,7 +215,7 @@ class VideoProgressView(ApiBaseView):
         },
     )
     def post(self, request, video_id):
-        """set video progress position in redis"""
+        """set video progress position in PostgreSQL runtime store"""
         data_serializer = VideoProgressUpdateSerializer(data=request.data)
         data_serializer.is_valid(raise_exception=True)
         validated_data = data_serializer.validated_data
@@ -215,9 +227,9 @@ class VideoProgressView(ApiBaseView):
 
         position = validated_data["position"]
         key = self._get_key(request.user.id, video_id)
-        redis_con = RedisArchivist()
+        store = RuntimeStore()
         current_progress = (
-            redis_con.get_message_dict(key) or self.response["player"]
+            store.get_message_dict(key) or self.response["player"]
         )
 
         current_progress.update({"position": position, "youtube_id": video_id})
@@ -229,7 +241,7 @@ class VideoProgressView(ApiBaseView):
 
         current_progress.update({"watched": watched})
         if position > 5:
-            redis_con.set_message(key, current_progress, expire=expire)
+            store.set_message(key, current_progress, expire=expire)
 
         response_serializer = PlayerSerializer(current_progress)
 
@@ -254,36 +266,37 @@ class VideoProgressView(ApiBaseView):
         }
     )
     def delete(self, request, video_id):
-        """delete progress position"""
+        """delete progress position from PostgreSQL runtime store"""
         key = self._get_key(request.user.id, video_id)
-        RedisArchivist().del_message(key)
+        RuntimeStore().del_message(key)
 
         return Response(status=204)
 
 
 class VideoSimilarView(ApiBaseView):
+    model = Video
+    to_data = staticmethod(video_data)
+    is_video = True
     """resolves to /api/video/<video-id>/similar/
     GET: return max 6 videos similar to this
     """
-
-    search_base = "ta_video/_search/"
 
     @extend_schema(
         responses=VideoSerializer(many=True),
     )
     def get(self, request, video_id):
         """get similar videos"""
-        self.data = {
-            "size": 6,
-            "query": {
-                "more_like_this": {
-                    "fields": ["tags", "title"],
-                    "like": {"_id": video_id},
-                    "min_term_freq": 1,
-                    "max_query_terms": 25,
-                }
-            },
-        }
+        source = Video.objects.filter(pk=video_id).first()
+        if source is None:
+            return Response([])
+        from django.contrib.postgres.search import TrigramSimilarity
+
+        self._queryset = (
+            Video.objects.exclude(pk=video_id)
+            .annotate(similarity=TrigramSimilarity("title", source.title))
+            .filter(similarity__gt=0.1)
+            .order_by("-similarity", "pk")[:6]
+        )
         self.get_document_list(request, pagination=False)
         serializer = VideoSerializer(self.response["data"], many=True)
         return Response(serializer.data)

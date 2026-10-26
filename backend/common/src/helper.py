@@ -3,7 +3,6 @@ Loose collection of helper functions
 - don't import AppConfig class here to avoid circular imports
 """
 
-import json
 import os
 import random
 import string
@@ -14,7 +13,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from common.src.es_connect import IndexPaginate
 
 
 def ignore_filelist(filelist: list[str]) -> list[str]:
@@ -115,8 +113,12 @@ def date_parser(timestamp: int | float | str | None) -> str | None:
     elif isinstance(timestamp, str) and timestamp.isdigit():
         date_obj = datetime.fromtimestamp(int(timestamp), tz=timezone.utc)
     elif isinstance(timestamp, str):
-        date_obj = datetime.strptime(timestamp, "%Y-%m-%d")
-        date_obj = date_obj.replace(tzinfo=timezone.utc)
+        try:
+            date_obj = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            date_obj = datetime.strptime(timestamp, "%Y-%m-%d")
+        if date_obj.tzinfo is None:
+            date_obj = date_obj.replace(tzinfo=timezone.utc)
     else:
         raise TypeError(f"invalid timestamp: {timestamp}")
 
@@ -158,14 +160,6 @@ def clear_dl_cache(cache_dir: str) -> int:
         os.remove(to_delete)
 
     return len(leftover_files)
-
-
-def get_mapping() -> dict:
-    """read index_mapping.json and get expected mapping and settings"""
-    with open("appsettings/index_mapping.json", "r", encoding="utf-8") as f:
-        index_config: dict = json.load(f).get("index_config")
-
-    return index_config
 
 
 def is_shorts(youtube_id: str) -> bool:
@@ -281,54 +275,49 @@ def is_missing(
     on_key: str = "youtube_id",
 ) -> list[str]:
     """id or list of ids that are missing from index_name"""
-    if isinstance(to_check, str):
-        to_check = [to_check]
+    from download.models import Download
+    from video.models import Video
 
-    data = {
-        "query": {"terms": {on_key: to_check}},
-        "_source": [on_key],
-    }
-    result = IndexPaginate(index_name, data=data).get_results()
-    existing_ids = [i[on_key] for i in result]
-    dl = [i for i in to_check if i not in existing_ids]
-
-    return dl
+    ids = [to_check] if isinstance(to_check, str) else to_check
+    models = (
+        [Video, Download]
+        if "video" in index_name and "download" in index_name
+        else [Download] if "download" in index_name else [Video]
+    )
+    existing = set().union(
+        *(
+            set(model.objects.filter(pk__in=ids).values_list("pk", flat=True))
+            for model in models
+        )
+    )
+    return [item for item in ids if item not in existing]
 
 
 def get_channel_overwrites() -> dict[str, dict[str, Any]]:
     """get overwrites indexed my channel_id"""
-    data = {
-        "query": {
-            "bool": {"must": [{"exists": {"field": "channel_overwrites"}}]}
-        },
-        "_source": ["channel_id", "channel_overwrites"],
-    }
-    result = IndexPaginate("ta_channel", data).get_results()
-    overwrites = {i["channel_id"]: i["channel_overwrites"] for i in result}
+    from channel.models import Channel
 
-    return overwrites
+    return {
+        row.pk: row.overrides for row in Channel.objects.exclude(overrides={})
+    }
 
 
 def get_channels(
     subscribed_only: bool, source: list[str] | None = None
 ) -> list[dict]:
     """get a list of all channels"""
-    data = {
-        "sort": [{"channel_name.keyword": {"order": "asc"}}],
-    }
-    if subscribed_only:
-        query = {"term": {"channel_subscribed": {"value": True}}}
-    else:
-        query = {"match_all": {}}
+    from channel.models import Channel
+    from common.src.domain import channel_data
 
-    data["query"] = query  # type: ignore
-
-    if source:
-        data["_source"] = source  # type: ignore
-
-    all_channels = IndexPaginate("ta_channel", data).get_results()
-
-    return all_channels
+    rows = (
+        Channel.objects.filter(subscribed=True)
+        if subscribed_only
+        else Channel.objects.all()
+    )
+    return [
+        _select_source(channel_data(row), source)
+        for row in rows.order_by("name", "pk")
+    ]
 
 
 def get_playlists(
@@ -336,21 +325,22 @@ def get_playlists(
 ) -> list[dict]:
     """get list of playlists"""
 
-    data = {
-        "sort": [{"playlist_channel.keyword": {"order": "desc"}}],
-    }
+    from common.src.domain import playlist_data
+    from playlist.models import Playlist
 
-    must_list = [{"term": {"playlist_active": {"value": True}}}]
+    rows = Playlist.objects.filter(active=True)
     if subscribed_only:
-        must_list.append({"term": {"playlist_subscribed": {"value": True}}})
+        rows = rows.filter(subscribed=True)
+    return [
+        _select_source(playlist_data(row), source)
+        for row in rows.order_by("channel_name", "pk")
+    ]
 
-    data = {"query": {"bool": {"must": must_list}}}  # type: ignore
-    if source:
-        data["_source"] = source  # type: ignore
 
-    all_playlists = IndexPaginate("ta_playlist", data).get_results()
-
-    return all_playlists
+def _select_source(data: dict, source: list[str] | None) -> dict:
+    return (
+        {key: data[key] for key in source if key in data} if source else data
+    )
 
 
 def calc_is_watched(duration: float, position: float) -> bool:

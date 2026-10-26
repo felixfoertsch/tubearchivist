@@ -69,6 +69,13 @@ class AppConfigAppSerializer(
     enable_snapshot = serializers.BooleanField()
     enable_cast = serializers.BooleanField()
 
+    def validate_enable_snapshot(self, value):
+        if value:
+            raise serializers.ValidationError(
+                "Snapshots are unsupported. Use PostgreSQL backups."
+            )
+        return value
+
 
 class AppConfigSerializer(ValidateUnknownFieldsMixin, serializers.Serializer):
     """serialize appconfig"""

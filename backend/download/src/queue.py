@@ -4,44 +4,65 @@ Functionality:
 - linked with ta_dowload index
 """
 
-import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from appsettings.src.config import AppConfig
 from channel.src.index import YoutubeChannel
 from channel.src.remote_query import get_last_channel_videos
+from common.src.domain import download_data, save_download
+from common.src.domain import video_data as video_domain_data
 from common.src.env_settings import EnvironmentSettings
-from common.src.es_connect import ElasticWrap, IndexPaginate
 from common.src.helper import (
     get_channels,
     get_duration_str,
     is_shorts,
     rand_sleep,
 )
+from common.src.runtime import RuntimeQueue
 from common.src.urlparser import ParsedURLType
+from download.models import Download
 from download.serializers import DownloadItemSerializer
 from download.src.queue_interact import PendingInteract
 from download.src.thumbnails import ThumbManager
 from playlist.src.index import YoutubePlaylist
+from video.models import Video
 from video.src.constants import VideoTypeEnum
 from video.src.index import YoutubeVideo
 
 
 def delete_and_ignore(videos):
-    """Share watched-age deletion and its normal ignore-queue path."""
-    parsed_ids: list[ParsedURLType] = []
-    for video in videos:
-        YoutubeVideo(video["youtube_id"]).delete_media_file()
-        parsed_ids.append(
-            {
-                "type": "video",
-                "url": video["youtube_id"],
-                "vid_type": VideoTypeEnum(video["vid_type"]),
-            }
+    """Persist local ignore metadata before deleting archived video data."""
+    for item in videos:
+        archived = (
+            Video.objects.select_related("channel")
+            .filter(pk=item["youtube_id"])
+            .first()
         )
-    if parsed_ids:
-        PendingList(youtube_ids=parsed_ids).parse_url_list(status="ignore")
+        if archived:
+            existing = Download.objects.filter(pk=archived.pk).first()
+            if not existing or existing.status != "ignore":
+                metadata = video_domain_data(archived)
+                save_download(
+                    {
+                        "youtube_id": archived.pk,
+                        "channel_id": archived.channel_id,
+                        "title": archived.title,
+                        "status": "ignore",
+                        "vid_type": archived.video_type,
+                        "timestamp": (
+                            existing.timestamp
+                            if existing
+                            else int(datetime.now().timestamp())
+                        ),
+                        "channel_indexed": True,
+                        "channel_name": archived.channel.name,
+                        "duration": get_duration_str(archived.duration),
+                        "published": metadata.get("published"),
+                        "vid_thumb_url": metadata.get("vid_thumb_url"),
+                    }
+                )
+        YoutubeVideo(item["youtube_id"]).delete_media_file()
 
 
 class PendingIndex:
@@ -58,11 +79,10 @@ class PendingIndex:
 
     def get_download(self):
         """get a list of all pending videos in ta_download"""
-        data = {
-            "query": {"match_all": {}},
-            "sort": [{"timestamp": {"order": "asc"}}],
-        }
-        all_results = IndexPaginate("ta_download", data).get_results()
+        all_results = [
+            download_data(item)
+            for item in Download.objects.order_by("timestamp", "id")
+        ]
 
         self.all_pending = []
         self.all_ignored = []
@@ -77,11 +97,10 @@ class PendingIndex:
 
     def get_indexed(self):
         """get a list of all videos indexed"""
-        data = {
-            "query": {"match_all": {}},
-            "sort": [{"published": {"order": "desc"}}],
-        }
-        self.all_videos = IndexPaginate("ta_video", data).get_results()
+        self.all_videos = [
+            video_domain_data(video)
+            for video in Video.objects.order_by("-published", "id")
+        ]
         for video in self.all_videos:
             self.to_skip.append(video["youtube_id"])
 
@@ -482,39 +501,13 @@ class PendingList(PendingIndex):
             return 0
 
         self._notify_start(total)
-        bulk_list = []
         for video_entry in self.missing_videos:
             video_entry.update(
-                {
-                    "status": status,
-                    "auto_start": self.auto_start,
-                }
+                {"status": status, "auto_start": self.auto_start}
             )
-            video_id = video_entry["youtube_id"]
-            action = {"index": {"_index": "ta_download", "_id": video_id}}
-            bulk_list.append(json.dumps(action))
-            bulk_list.append(json.dumps(video_entry))
-
-        # add last newline
-        bulk_list.append("\n")
-        query_str = "\n".join(bulk_list)
-        response, status_code = ElasticWrap("_bulk").post(
-            query_str, ndjson=True
-        )
-        if status_code not in [200, 201]:
-            print(response)
-            self._notify_fail(status_code)
-        elif response.get("errors", False):
-            failed_video_ids = []
-            for item in response.get("items", []):
-                action, result = next(iter(item.items()))
-                if "error" in result:
-                    failed_video_ids.append(result.get("_id"))
-
-            failed_video_ids_str = ",".join(failed_video_ids)
-            self._notify_fail(status_code, failed_video_ids_str)
-        else:
-            self._notify_done(total)
+            save_download(video_entry)
+            RuntimeQueue("download:pending").add(video_entry["youtube_id"])
+        self._notify_done(total)
 
         return len(self.missing_videos)
 
