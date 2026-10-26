@@ -6,6 +6,7 @@
 - Validated `main` pushes publish only this fork's `nightly` channel. Published non-prerelease releases publish exact immutable release tags, `stable`, and `latest`; prereleases never publish.
 - Keep multi-architecture `linux/amd64` and `linux/arm64` builds. Isolate package-write credentials from source execution; publisher consumes OCI data only. Reject stale channel promotion.
 - CI uses built-in `GITHUB_TOKEN` only. No automatic releases, upstream publishers, deployments, or remote source mutations.
+- Narrow exception: manually dispatch `.github/workflows/preserve-stable.yml` on the current `main` commit directly following `b8c413495fd61f7a584e7a2e239a03b5e717ccef` to preserve its already-running production OCI digest as `stable` and `latest`, without rebuilding. Only the hardcoded production digest is eligible; later source commits disable this path. No runtime changes.
 - Run `node scripts/test-workflow.mjs` after workflow edits. Application checks retain existing package managers and lint/test stacks.
 
 # Feature delivery

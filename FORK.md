@@ -19,6 +19,18 @@ No source pushes, automatic releases, upstream registry publication, or deployme
 
 Run the stdlib workflow contract check with `node scripts/test-workflow.mjs`. Full builds and registry checks run on GitHub-hosted ephemeral runners.
 
+## Exact production baseline exception
+
+`.github/workflows/preserve-stable.yml` is a manually dispatched, single-baseline exception to release-only stable publication. It preserves existing production bytes, not a rebuild:
+
+- Source revision: `b8c413495fd61f7a584e7a2e239a03b5e717ccef`.
+- OCI index: `sha256:cde3cab697290fc9d59e2e1bf47b1e2b35bc3df464cb63ff8d0ed3c24153a408`.
+- Platforms: exactly `linux/amd64` and `linux/arm64`, with verified source/revision labels.
+
+Dispatch `preserve-stable.yml` with ref `main` and no inputs, only after review and successful normal CI for the preservation commit. That commit must be the direct child of the production revision and still current `main`. Do not push further development until preservation succeeds. Read-only registry verification exports the exact OCI archive; the isolated package-write job consumes only that archive and rechecks its digest, platforms, and labels. It shares the normal publisher's concurrency group and copies all manifests with digest preservation. It accepts existing `stable/latest` only at the previously observed `sha256:38cace6d1aac9508725fc7488e8239caf3a06ae112627d9af94798966a04abe7` or the production digest, allowing partial-run retries without overwriting a later release. Missing aliases fail closed.
+
+Before dispatch, pause other registry writers and source pushes until verification finishes; the shared concurrency group serializes this repository's CI publishers but cannot lock external registry writers. GHCR alias writes have no conditional compare-and-swap here, so external-writer exclusion is an operational prerequisite, not a guaranteed registry lock. The writer checks current `main` before and after each alias copy, then independently reads both published aliases and configs. Ref updates and registry writes cannot be atomic; an external push during a copy can cause a failed run after one alias moved. Stop on failure, inspect both aliases, and retry only while the same reviewed commit remains current `main`. Do not bypass guards or automatically roll back. The manual preservation workflow performs no release, source build, `nightly` update, runtime pull, container restart, or data change. Pushing the preservation commit still triggers normal `image.yml` validation and a `nightly` rebuild of the same application source. After success, independently verify both aliases against the production digest before changing only the production configured update channel. Later Postgres work stays on `nightly`; stable publication still requires explicit non-prerelease release outside this narrow exception.
+
 ## Channel rolling window
 
 Set optional channel override `channel_overwrites.rolling_window_size` to a

@@ -1,0 +1,113 @@
+name: Preserve exact production image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/felixfoertsch/tubearchivist
+  DIGEST: sha256:cde3cab697290fc9d59e2e1bf47b1e2b35bc3df464cb63ff8d0ed3c24153a408
+  REVISION: b8c413495fd61f7a584e7a2e239a03b5e717ccef
+  PREVIOUS: sha256:38cace6d1aac9508725fc7488e8239caf3a06ae112627d9af94798966a04abe7
+
+jobs:
+  verify:
+    if: github.repository == 'felixfoertsch/tubearchivist' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Install registry transport
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+      - name: Read exact production OCI data without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf '%s' "$GH_TOKEN" | skopeo login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          skopeo copy --all --preserve-digests "docker://$IMAGE@$DIGEST" "oci-archive:$RUNNER_TEMP/production.tar"
+          archive="oci-archive:$RUNNER_TEMP/production.tar"
+          test "$(skopeo inspect "$archive" | jq -r .Digest)" = "$DIGEST"
+          skopeo inspect --raw "$archive" | jq -e '[.manifests[].platform | .os + "/" + .architecture] | sort == ["linux/amd64", "linux/arm64"]'
+          for arch in amd64 arm64; do
+            skopeo inspect --config --override-arch "$arch" "$archive" | jq -e --arg revision "$REVISION" '.config.Labels["org.opencontainers.image.revision"] == $revision and .config.Labels["org.opencontainers.image.source"] == "https://github.com/felixfoertsch/tubearchivist"'
+          done
+      - uses: actions/upload-artifact@v6
+        with:
+          name: production-image
+          path: ${{ runner.temp }}/production.tar
+          retention-days: 2
+
+  promote:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: fork-image-publication
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # No checkout or repository source execution with package-write credentials.
+      - uses: actions/download-artifact@v7
+        with:
+          name: production-image
+          path: ${{ runner.temp }}/image
+      - name: Install registry transport
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+      - name: Guard and preserve exact production bytes
+        uses: actions/github-script@v8
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ARCHIVE: oci-archive:${{ runner.temp }}/image/production.tar
+        with:
+          script: |
+            const {execFileSync} = require('node:child_process');
+            const {IMAGE: image, DIGEST: digest, REVISION: revision, PREVIOUS: previous, ARCHIVE: archive} = process.env;
+            const {owner, repo} = context.repo;
+            const transport = (...args) => execFileSync('skopeo', args, {encoding: 'utf8'});
+            const inspect = target => JSON.parse(transport('inspect', target)).Digest;
+            async function guard() {
+              if (`${owner}/${repo}` !== 'felixfoertsch/tubearchivist' || context.eventName !== 'workflow_dispatch' || context.ref !== 'refs/heads/main') throw new Error('Not an authorized preservation event');
+              const {data: main} = await github.rest.git.getRef({owner, repo, ref: 'heads/main'});
+              if (main.object.sha !== context.sha) throw new Error('Stale preservation');
+              const {data: commit} = await github.rest.repos.getCommit({owner, repo, ref: context.sha});
+              if (commit.parents.length !== 1 || commit.parents[0].sha !== revision) throw new Error('Preservation must immediately follow production baseline');
+            }
+            function verify(target) {
+              if (inspect(target) !== digest) throw new Error('Production digest mismatch');
+              const raw = JSON.parse(transport('inspect', '--raw', target));
+              const platforms = raw.manifests.map(({platform: p}) => `${p.os}/${p.architecture}`).sort();
+              if (JSON.stringify(platforms) !== JSON.stringify(['linux/amd64', 'linux/arm64'])) throw new Error('Unexpected platforms');
+              for (const arch of ['amd64', 'arm64']) {
+                const config = JSON.parse(transport('inspect', '--config', '--override-arch', arch, target));
+                if (config.config.Labels['org.opencontainers.image.revision'] !== revision || config.config.Labels['org.opencontainers.image.source'] !== 'https://github.com/felixfoertsch/tubearchivist') throw new Error('Production identity mismatch');
+              }
+            }
+            function aliases() {
+              for (const alias of ['stable', 'latest']) {
+                if (![previous, digest].includes(inspect(`docker://${image}:${alias}`))) throw new Error('Production alias changed; refusing overwrite');
+              }
+            }
+            await guard();
+            verify(archive);
+            execFileSync('skopeo', ['login', 'ghcr.io', '--username', context.actor, '--password-stdin'], {input: process.env.GITHUB_TOKEN});
+            aliases();
+            for (const alias of ['stable', 'latest']) {
+              await guard();
+              aliases();
+              transport('copy', '--all', '--preserve-digests', archive, `docker://${image}:${alias}`);
+              await guard();
+              verify(`docker://${image}:${alias}`);
+            }
+            await guard();
+            for (const alias of ['stable', 'latest']) verify(`docker://${image}:${alias}`);
+          github-token: ${{ github.token }}
