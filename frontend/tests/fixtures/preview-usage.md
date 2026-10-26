@@ -12,7 +12,7 @@ node frontend/tests/new-ui-browser-server.mjs
 
 Default port 4174, default dist `frontend/dist` relative to runner file. Override only through `PREVIEW_PORT` / `PREVIEW_DIST`. Import `createPreviewServer({ dist })`, then `await preview.listen(0)` for isolated HTTP tests; `await preview.close()` afterwards. `.listen` always binds loopback. No new test dependencies.
 
-Use actual mounted React bundle at `/`; deep `/old/*` paths always serve classic entry, other extensionless paths modern entry. This does NOT prove client router recognizes those paths. Missing assets fail 404, unknown API/method fails 501. Inspect browser network failures rather than interpreting absent results as parity.
+Use actual mounted React bundle at `/`; `/old/*` paths return 404, other extensionless paths serve modern entry. This does NOT prove client router recognizes those paths. Missing assets fail 404, unknown API/method fails 501. Inspect browser network failures rather than interpreting absent results as parity.
 
 Local control requests (browser same-origin `fetch`):
 

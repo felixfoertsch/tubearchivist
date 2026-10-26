@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import useIsAdmin from '../../functions/useIsAdmin';
-import { ColourConstant, FileSizeUnits } from '../../api/actions/updateUserConfig';
-import type { ColourVariants, UserConfigType } from '../../api/actions/updateUserConfig';
+import { FileSizeUnits } from '../../api/actions/updateUserConfig';
+import type { UserConfigType } from '../../api/actions/updateUserConfig';
 import { useUserConfigStore } from '../../stores/UserConfigStore';
 import { SettingsUserSection } from '../components/SettingsUserSections';
 import { pageSizePayload, saveUserSettings } from '../lib/settingsUser';
@@ -56,35 +56,6 @@ export default function SettingsUser() {
         Personal interface preferences. Save each choice to apply it to your account.
       </p>
       <SettingsUserSection title="Interface">
-        <label className="grid gap-1 text-sm" htmlFor="stylesheet">
-          Classic UI color scheme
-          <NativeSelect
-            id="stylesheet"
-            value={userConfig.stylesheet}
-            disabled={pending}
-            onChange={event => {
-              const value = event.target.value as ColourVariants;
-              void save({ stylesheet: value }).then(success => {
-                if (success) {
-                  try {
-                    localStorage.setItem('stylesheet', value);
-                  } catch {
-                    setError('Preference saved, but local theme storage is unavailable.');
-                  }
-                }
-              });
-            }}
-          >
-            {Object.entries(ColourConstant).map(([label, value]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </NativeSelect>
-          <span className="text-xs text-muted-foreground">
-            Applies to classic UI only. Header Theme control changes new UI appearance.
-          </span>
-        </label>
         <label className="grid gap-1 text-sm" htmlFor="page-size">
           Archive view page size
           <Input

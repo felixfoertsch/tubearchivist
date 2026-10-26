@@ -51,16 +51,6 @@ urlpatterns = [
         )
         for directory in ("assets", "css", "favicon", "font", "img")
     ],
-    path(
-        "old/",
-        views_frontend.classic_frontend_index,
-        name="classic-frontend",
-    ),
-    path(
-        "old/<path:route>",
-        views_frontend.classic_frontend_index,
-        name="classic-frontend-route",
-    ),
     path("new/", views_frontend.legacy_new_redirect),
     path("new/<path:route>", views_frontend.legacy_new_redirect),
     re_path(

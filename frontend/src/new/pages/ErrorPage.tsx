@@ -1,11 +1,9 @@
-import { useLocation, useRouteError, isRouteErrorResponse, Link } from 'react-router-dom';
-import { classicHref } from '../lib/navigation';
+import { useRouteError, isRouteErrorResponse, Link } from 'react-router-dom';
 import NewRoutes from '../routes';
 import { Button } from '../ui/button';
 
 export default function ErrorPage() {
   const error = useRouteError();
-  const location = useLocation();
   const forbidden = isRouteErrorResponse(error) && error.status === 403;
   return (
     <main className="mx-auto max-w-xl space-y-4 p-6">
@@ -24,9 +22,6 @@ export default function ErrorPage() {
         </Button>
         <Button variant="outline" asChild>
           <Link to={NewRoutes.Home}>Home</Link>
-        </Button>
-        <Button variant="outline" asChild>
-          <a href={classicHref(location.pathname + location.search)}>Classic UI</a>
         </Button>
       </div>
     </main>

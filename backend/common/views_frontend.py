@@ -50,21 +50,6 @@ def django_static(_request, asset_path: str):
 
 
 @require_safe
-def classic_frontend_index(_request, route: str = ""):
-    """Serve the classic Vite entry point, including client-side 404s."""
-    if ".." in route.split("/") or "\\" in route:
-        raise Http404
-    response = _serve_file(
-        FRONTEND_ROOT,
-        "old/index.html",
-        "no-store, no-cache, must-revalidate",
-    )
-    response["Pragma"] = "no-cache"
-    response["Expires"] = "0"
-    return response
-
-
-@require_safe
 def legacy_new_redirect(request, route: str = ""):
     """Keep old /new/ bookmarks working now the new UI lives at root."""
     target = "/" + route.lstrip("/\\")

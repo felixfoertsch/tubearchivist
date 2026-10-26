@@ -1014,8 +1014,9 @@ export function createPreviewServer({ dist = defaultDist, fixtureMedia } = {}) {
         return send(405, { error: 'Static GET/HEAD only' });
       const root = await realpath(dist);
       let relative = decoded.replace(/^\//, '');
-      if (decoded === '/old' || decoded.startsWith('/old/')) relative = 'old/index.html';
-      else if (!extname(relative) && !decoded.startsWith('/assets/')) relative = 'index.html';
+      if (decoded === '/old' || decoded.startsWith('/old/'))
+        return send(404, { error: 'Classic UI removed' });
+      if (!extname(relative) && !decoded.startsWith('/assets/')) relative = 'index.html';
       const candidate = await realpath(resolve(root, relative));
       if (!candidate.startsWith(root + sep)) return send(403, { error: 'Unsafe asset path' });
       if (!(await stat(candidate)).isFile()) return send(404, { error: 'Asset missing' });

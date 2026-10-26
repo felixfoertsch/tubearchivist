@@ -38,7 +38,7 @@ def client():
         yield Client()
 
 
-def test_new_entry_at_root_and_classic_at_old(frontend_root, client):
+def test_modern_entry_and_assets(frontend_root, client):
     response = client.get("/")
     assert response.status_code == 200
     assert response.content == b"new entry"
@@ -52,25 +52,26 @@ def test_new_entry_at_root_and_classic_at_old(frontend_root, client):
     assert asset.content == b"new asset"
     assert asset["Cache-Control"] == "public, max-age=31536000, immutable"
 
-    classic = client.get("/old/")
-    assert classic.content == b"classic entry"
-    assert classic["Cache-Control"] == "no-store, no-cache, must-revalidate"
-    assert client.head("/old/").status_code == 200
-    assert client.post("/old/").status_code == 405
+    assert client.head("/").status_code == 200
+    assert client.post("/").status_code == 405
 
 
-def test_classic_nested_routes_stay_in_classic_frontend(frontend_root, client):
-    response = client.get("/old/videos/watch/abc")
-    assert response.status_code == 200
-    assert response.content == b"classic entry"
-    assert response["Cache-Control"] == "no-store, no-cache, must-revalidate"
-
-    assert client.get("/old/unknown/route").content == b"classic entry"
-    assert client.head("/old/video/abc?t=12").status_code == 200
-    assert client.get("/old/api/not-a-route").content == b"classic entry"
-
-    (frontend_root / "old" / "index.html").unlink()
-    assert client.get("/old/video/abc").status_code == 404
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/old",
+        "/old/",
+        "/old/videos/watch/abc",
+        "/old/unknown/route",
+        "/old/video/abc?t=12",
+        "/old/api/not-a-route",
+        "/old/index.html",
+    ],
+)
+def test_removed_classic_routes_return_404(frontend_root, client, path):
+    # Even stale classic build output must never be exposed.
+    assert client.get(path).status_code == 404
+    assert client.head(path).status_code == 404
 
 
 def test_legacy_new_paths_redirect_to_root(frontend_root, client):
@@ -93,4 +94,4 @@ def test_frontend_boundaries_remain_unchanged(frontend_root, client):
     assert resolve("/admin/login/").app_name == "admin"
     assert client.get("/media/not-a-file").status_code == 404
     assert client.get("/static/not-a-file").status_code == 404
-    assert client.post("/old/videos/watch/abc").status_code == 405
+    assert client.post("/old/videos/watch/abc").status_code == 404

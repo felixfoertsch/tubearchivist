@@ -26,20 +26,3 @@ export function safeReturnTo(value: string | null): string {
 export function loginHref(value: string): string {
   return `${NewRoutes.Login}?next=${encodeURIComponent(safeReturnTo(value))}`;
 }
-
-export function classicHref(value: string): string {
-  if (value.split(/[?#]/, 1)[0] === NewRoutes.Login) return '/old/login/';
-  const safe = safeReturnTo(value);
-  if (safe !== value) return '/old/';
-  const url = new URL(safe, 'https://return.invalid');
-  if (/^\/dashboard\/?$/.test(url.pathname)) return `/old/settings/${url.search}`;
-  if (/^\/settings\/?$/.test(url.pathname)) {
-    const section = ['user', 'application', 'scheduling', 'actions'].includes(url.hash.slice(1))
-      ? url.hash.slice(1)
-      : 'user';
-    return `/old/settings/${section}/${url.search}`;
-  }
-  if (/^\/settings\/(user|application|scheduling|actions)\/$/.test(url.pathname))
-    return `/old${url.pathname}${url.search}`;
-  return `/old${value}`;
-}

@@ -41,7 +41,9 @@ test('local preview HTTP boundary, modes, permissions and in-memory writes', asy
     const modern = await fetch(base + '/channel/local');
     assert.equal(modern.status, 200);
     assert.match(await modern.text(), /LOCAL FIXTURES ONLY/);
-    assert.match(await (await fetch(base + '/old/')).text(), /Classic/);
+    assert.equal((await fetch(base + '/old/')).status, 404);
+    assert.equal((await fetch(base + '/old/index.html')).status, 404);
+    assert.equal((await fetch(base + '/old/video/local')).status, 404);
     const asset = await fetch(base + '/assets/test.js');
     assert.equal(asset.status, 200);
     assert.match(asset.headers.get('content-type'), /javascript/);

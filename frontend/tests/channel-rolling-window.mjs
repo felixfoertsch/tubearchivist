@@ -6,19 +6,56 @@ import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 
 // Exercise real component handlers without adding a DOM or test-framework dependency.
-const source = readFileSync(
-  new URL('../src/components/ChannelRollingWindow.tsx', import.meta.url),
-  'utf8',
-);
-const { outputText } = ts.transpileModule(source, {
+const source = readFileSync(new URL('../src/new/pages/Channel.tsx', import.meta.url), 'utf8');
+const { outputText } = ts.transpileModule(source + '\nexport { About };', {
   compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
 });
+
+const metadata = {};
+runInNewContext(
+  ts.transpileModule(
+    readFileSync(new URL('../src/new/videoMetadata.ts', import.meta.url), 'utf8'),
+    {
+      compilerOptions: { module: ts.ModuleKind.CommonJS },
+    },
+  ).outputText,
+  { exports: metadata },
+);
+
+// Run actual parent mutation handler: failures must reach About's alert, not only return false.
+const channelAst = ts.createSourceFile('Channel.tsx', source, ts.ScriptTarget.Latest, true);
+const channel = channelAst.statements.find(
+  node => ts.isFunctionDeclaration(node) && node.name?.text === 'Channel',
+);
+const mutate = channel.body.statements.find(
+  node =>
+    ts.isVariableStatement(node) && node.declarationList.declarations[0].name.text === 'mutate',
+);
+const parentHandler = ts.transpileModule(
+  mutate.getText(channelAst) + '\nexports.mutate = mutate;',
+  {
+    compilerOptions: { module: ts.ModuleKind.CommonJS },
+  },
+).outputText;
 
 function mount(initialValue) {
   const state = [];
   const calls = [];
   let cursor = 0;
   let response = { status: 200 };
+  let error = '';
+  const parent = {};
+  runInNewContext(parentHandler, {
+    exports: parent,
+    pending: false,
+    setPending() {},
+    setError: value => {
+      error = value;
+    },
+    refresh() {},
+    assertResponse: metadata.assertResponse,
+    errorMessage: metadata.errorMessage,
+  });
   const exports = {};
   const jsx = (type, props) => ({ type, props });
   runInNewContext(outputText, {
@@ -38,21 +75,30 @@ function mount(initialValue) {
             ];
           },
         };
-      if (name === '../api/actions/updateChannelOverwrite')
-        return {
-          __esModule: true,
-          default: async (...args) => {
-            calls.push(args);
-            if (response instanceof Error) throw response;
-            return response;
-          },
-        };
-      throw new Error(`Unexpected import: ${name}`);
+      if (name === '../videoMetadata') return metadata;
+      if (name === '../components/useConfirm')
+        return { useConfirm: () => ({ confirm: async () => true }) };
+      return {};
     },
   });
   function render() {
     cursor = 0;
-    return exports.default({ channelId: 'channel-id', initialValue });
+    return exports.About({
+      channel: {
+        channel_id: 'channel-id',
+        channel_overwrites: { rolling_window_size: initialValue },
+      },
+      admin: true,
+      pending: false,
+      error,
+      overwrite: (...args) =>
+        parent.mutate(async () => {
+          calls.push(['channel-id', ...args]);
+          const result = await response;
+          if (result instanceof Error) throw result;
+          return result;
+        }),
+    });
   }
   function nodes(node) {
     if (!node || typeof node !== 'object') return [];
@@ -65,13 +111,13 @@ function mount(initialValue) {
     },
     input(value) {
       nodes(render())
-        .find(node => node.type === 'input')
+        .find(node => node.props?.inputMode === 'numeric')
         .props.onChange({ target: { value } });
     },
     submit() {
       return nodes(render())
-        .find(node => node.type === 'form')
-        .props.onSubmit({ preventDefault() {} });
+        .find(node => node.props?.children === 'Save rolling window')
+        .props.onClick();
     },
     reset() {
       return nodes(render())
@@ -82,12 +128,11 @@ function mount(initialValue) {
       return nodes(render()).some(node => node.props?.role === role);
     },
     value() {
-      return nodes(render()).find(node => node.type === 'input').props.value;
+      return nodes(render()).find(node => node.props?.inputMode === 'numeric').props.value;
     },
     disabled() {
-      return nodes(render())
-        .filter(node => ['input', 'button'].includes(node.type))
-        .every(node => node.props.disabled);
+      return nodes(render()).find(node => node.props?.children === 'Save rolling window').props
+        .disabled;
     },
     text() {
       return JSON.stringify(render());
@@ -98,9 +143,9 @@ function mount(initialValue) {
 test('validates positive whole numbers without sending invalid requests', async () => {
   const ui = mount();
   assert.equal(ui.value(), '');
-  assert.match(ui.text(), /Uses the regular-video page size, not a full-channel scan/);
-  assert.match(ui.text(), /Pending downloads, failed or empty scans postpone cleanup/);
-  assert.match(ui.text(), /Deleted videos stay ignored until you un-ignore them/);
+  assert.match(ui.text(), /not a full-channel scan/);
+  assert.match(ui.text(), /Pending downloads and failed or empty/);
+  assert.match(ui.text(), /Deleted videos stay ignored until/);
   for (const value of [
     '0',
     '-1',
@@ -120,7 +165,7 @@ test('validates positive whole numbers without sending invalid requests', async 
   await ui.submit();
   assert.deepEqual(ui.calls[0], ['channel-id', 'rolling_window_size', 12]);
   assert.equal(ui.hasRole('status'), true);
-  assert.match(ui.text(), /12 regular videos/);
+  assert.match(ui.text(), /Persisted policy:.*12/);
   ui.input('2147483647');
   await ui.submit();
   assert.deepEqual(ui.calls.at(-1), ['channel-id', 'rolling_window_size', 2147483647]);
@@ -139,8 +184,9 @@ test('blank and reset save null; failures preserve saved state and allow retry',
     ui.response(response);
     await ui.submit();
     assert.equal(ui.hasRole('alert'), true);
+    assert.match(ui.text(), /Request failed \(500\)|failure|offline/);
     assert.equal(ui.hasRole('status'), false);
-    assert.match(ui.text(), /8 regular videos/);
+    assert.match(ui.text(), /Persisted policy:.*8/);
   }
   ui.response({ status: 200 });
   ui.input('');
@@ -149,7 +195,8 @@ test('blank and reset save null; failures preserve saved state and allow retry',
   assert.equal(ui.hasRole('status'), true);
   ui.input('7');
   await ui.submit();
-  await ui.reset();
+  ui.reset();
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(ui.calls.at(-1)[2], null);
   assert.equal(ui.value(), '');
   assert.match(ui.text(), /Disabled/);

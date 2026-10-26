@@ -1,9 +1,7 @@
 import defaultHeaders from '../configuration/defaultHeaders';
 import getApiUrl from '../configuration/getApiUrl';
 import getFetchCredentials from '../configuration/getFetchCredentials';
-import logOut from '../api/actions/logOut';
 import getCookie from './getCookie';
-import Routes from '../configuration/routes/RouteList';
 import { useBackendStore } from '../stores/BackendStore';
 import { loginHref } from '../new/lib/navigation';
 
@@ -61,26 +59,12 @@ const APIClient = async <T>(
     } as ApiError;
   }
 
-  if (!window.location.pathname.startsWith('/old/')) {
-    if (response.status === 401) {
-      window.location.assign(loginHref(window.location.pathname + window.location.search));
-      throw new Error('Unauthorized: Redirecting to login.');
-    }
-    if (response.status === 403) {
-      return { status: 403, error: { error: 'Forbidden: Access denied.' } };
-    }
-  }
-
   if (response.status === 401) {
-    logOut();
-    window.location.href = Routes.Login;
+    window.location.assign(loginHref(window.location.pathname + window.location.search));
     throw new Error('Unauthorized: Redirecting to login.');
   }
-
   if (response.status === 403) {
-    logOut();
-    window.location.href = Routes.Login;
-    throw new Error('Forbidden: Access denied.');
+    return { status: 403, error: { error: 'Forbidden: Access denied.' } };
   }
 
   // expected empty response

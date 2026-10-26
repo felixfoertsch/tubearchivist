@@ -135,7 +135,6 @@ export default function Login() {
         </CardContent>
       </Card>
       <nav aria-label="Login links" className="flex flex-wrap gap-4 text-sm underline">
-        <a href="/old/login/">Classic UI</a>
         <a href="https://github.com/tubearchivist/tubearchivist" target="_blank" rel="noreferrer">
           GitHub
         </a>

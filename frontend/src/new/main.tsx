@@ -7,7 +7,6 @@ import {
   NavLink,
   Link,
   redirect,
-  useLocation,
   type LoaderFunctionArgs,
 } from 'react-router-dom';
 import loadAuth from '../api/loader/loadAuth';
@@ -22,7 +21,7 @@ import { useAppSettingsStore } from '../stores/AppSettingsStore';
 import useIsAdmin from '../functions/useIsAdmin';
 import type { AuthenticationType } from '../pages/Base';
 import NewRoutes from './routes';
-import { classicHref, loginHref } from './lib/navigation';
+import { loginHref } from './lib/navigation';
 import { applyTheme, readTheme } from './lib/theme';
 import { startTaskPolling } from './lib/tasks';
 import { TaskIndicator } from './components/TaskNotifications';
@@ -90,7 +89,6 @@ function ThemeRoot() {
 function App() {
   const isAdmin = useIsAdmin();
   const auth = useAuthStore(state => state.auth);
-  const location = useLocation();
   const [error, setError] = useState('');
   const [loggingOut, setLoggingOut] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -180,11 +178,6 @@ function App() {
               aria-label={`Theme: ${theme}. Switch to ${theme === 'system' ? 'light' : theme === 'light' ? 'dark' : 'system'}`}
             >
               {theme === 'system' ? 'System' : theme === 'dark' ? 'Dark' : 'Light'}
-            </Button>
-            <Button variant="outline" size="sm" asChild>
-              <a href={classicHref(location.pathname + location.search + location.hash)}>
-                Classic UI
-              </a>
             </Button>
             <Button variant="ghost" size="sm" disabled={loggingOut} onClick={logout}>
               Logout
