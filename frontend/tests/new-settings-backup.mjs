@@ -23,29 +23,31 @@ const backup = {};
 let status = 200,
   requested,
   clicked = false,
-  revoked = false;
+  link,
+  transportError,
+  apiUrl = 'https://local.test',
+  credentials = 'same-origin';
 runInNewContext(transpile('../src/new/lib/settingsBackup.ts'), {
   exports: backup,
   require: name =>
     name === './settingsApplication'
       ? metadata
-      : { default: () => (name.endsWith('getApiUrl') ? 'https://local.test' : 'same-origin') },
+      : { default: () => (name.endsWith('getApiUrl') ? apiUrl : credentials) },
   fetch: async (url, options) => {
     requested = { url, options };
-    return { ok: status === 200, status, blob: async () => new Blob(['PGDMP']) };
+    if (transportError) throw transportError;
+    return { ok: status === 200, status, blob: () => assert.fail('Must not buffer dump') };
   },
-  URL: {
-    createObjectURL: () => 'blob:fixture',
-    revokeObjectURL: () => {
-      revoked = true;
-    },
-  },
+  URL: { createObjectURL: () => assert.fail('Must not create blob URL') },
   document: {
-    createElement: () => ({
-      click: () => {
-        clicked = true;
-      },
-    }),
+    createElement: () => {
+      link = {
+        click: () => {
+          clicked = true;
+        },
+      };
+      return link;
+    },
   },
 });
 
@@ -62,7 +64,7 @@ test('native backup contract rejects malformed lists, dates, sizes and legacy ZI
     assert.throws(() => backup.validateBackups(value), /Invalid database backup/);
 });
 
-test('download uses authenticated API endpoint, surfaces HTTP failures, revokes blob URL', async () => {
+test('download validates access with HEAD then uses native attachment, never buffers body', async () => {
   const filename = previewData().backups[0].filename;
   for (status of [401, 403, 404, 500]) {
     clicked = false;
@@ -73,8 +75,23 @@ test('download uses authenticated API endpoint, surfaces HTTP failures, revokes 
   await backup.downloadBackup(filename);
   assert.equal(requested.url, `https://local.test/api/appsettings/backup/${filename}/download/`);
   assert.equal(requested.options.credentials, 'same-origin');
+  assert.equal(requested.options.method, 'HEAD');
   assert.equal(clicked, true);
-  assert.equal(revoked, true);
+  assert.equal(link.href, requested.url);
+  assert.equal(link.download, filename);
+  transportError = new Error('Network unavailable');
+  clicked = false;
+  await assert.rejects(backup.downloadBackup(filename), /Network unavailable/);
+  assert.equal(clicked, false);
+  transportError = undefined;
+  apiUrl = 'http://localhost:8000';
+  credentials = 'include';
+  await backup.downloadBackup(filename);
+  assert.equal(requested.options.credentials, 'include');
+  assert.equal(link.href, `http://localhost:8000/api/appsettings/backup/${filename}/download/`);
+  assert.equal(requested.options.headers, undefined);
+  apiUrl = 'https://local.test';
+  credentials = 'same-origin';
 });
 
 test('database backup page supports download/delete, no restore; failed list surfaces alert', async () => {
@@ -142,7 +159,17 @@ test('database backup page supports download/delete, no restore; failed list sur
       );
       assert.ok(!nodes(page).some(node => node.props?.children === 'Loading backups…'));
     } else {
-      const deletion = nodes(page).find(node => node.props?.variant === 'destructive');
+      status = 403;
+      await nodes(page)
+        .find(node => node.props?.children === 'Download')
+        .props.onClick();
+      assert.ok(
+        nodes(render()).some(
+          node => node.props?.role === 'alert' && node.props.children.includes('403'),
+        ),
+      );
+      status = 200;
+      const deletion = nodes(render()).find(node => node.props?.variant === 'destructive');
       await deletion.props.onClick();
       assert.deepEqual(requests.at(-1), [
         `/api/appsettings/backup/${previewData().backups[0].filename}/`,
@@ -163,6 +190,10 @@ test('preview models native list/create/download/delete and refuses online resto
     assert.equal((await fetch(base + list, { method: 'POST' })).status, 200);
     const item = base + list + files[0].filename + '/';
     assert.equal((await fetch(item, { method: 'POST' })).status, 409);
+    const head = await fetch(item + 'download/', { method: 'HEAD' });
+    assert.equal(head.status, 200);
+    assert.match(head.headers.get('content-disposition'), /attachment/);
+    assert.equal(await head.text(), '');
     assert.match(await (await fetch(item + 'download/')).text(), /^PGDMP/);
     assert.equal((await fetch(item, { method: 'DELETE' })).status, 204);
     assert.equal((await fetch(item + 'download/')).status, 404);

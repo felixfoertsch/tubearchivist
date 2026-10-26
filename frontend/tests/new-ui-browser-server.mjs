@@ -62,7 +62,7 @@ const routes = [
   ['snapshot', /^\/api\/appsettings\/snapshot\/$/, ['GET', 'POST']],
   ['snapshot-item', /^\/api\/appsettings\/snapshot\/([\w-]+)\/$/, ['POST']],
   ['backup', /^\/api\/appsettings\/backup\/$/, ['GET', 'POST']],
-  ['backup-download', /^\/api\/appsettings\/backup\/([\w.-]+)\/download\/$/, ['GET']],
+  ['backup-download', /^\/api\/appsettings\/backup\/([\w.-]+)\/download\/$/, ['GET', 'HEAD']],
   ['backup-item', /^\/api\/appsettings\/backup\/([\w.-]+)\/$/, ['POST', 'DELETE']],
   ['maintenance', /^\/api\/appsettings\/(manual-import|rescan-filesystem)\/$/, ['POST']],
   [

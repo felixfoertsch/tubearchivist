@@ -33,20 +33,15 @@ export function validateBackups(value: unknown): BackupListType {
 }
 
 export async function downloadBackup(filename: string): Promise<void> {
-  const response = await fetch(
-    `${getApiUrl()}/api/appsettings/backup/${encodeURIComponent(filename)}/download/`,
-    {
-      credentials: getFetchCredentials(),
-    },
-  );
+  const url = `${getApiUrl()}/api/appsettings/backup/${encodeURIComponent(filename)}/download/`;
+  const response = await fetch(url, {
+    method: 'HEAD',
+    credentials: getFetchCredentials(),
+  });
   if (!response.ok) throw new Error(`Database backup download failed (${response.status}).`);
-  const url = URL.createObjectURL(await response.blob());
-  try {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  // Let the browser stream the attachment; never buffer a database dump in JavaScript.
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
 }

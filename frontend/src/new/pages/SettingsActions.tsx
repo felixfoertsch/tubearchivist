@@ -148,7 +148,9 @@ function Actions() {
         <h3 className="font-semibold">Database backups</h3>
         <p className="text-sm">
           List, download or permanently delete native PostgreSQL database backups. Media files are
-          not included.
+          not included. Download checks access first, then starts a browser-managed transfer. Check
+          your browser for completion or transfer errors; access or file availability can change
+          after the check.
         </p>
         <Button variant="outline" onClick={() => setRevision(value => value + 1)}>
           Reload backups
