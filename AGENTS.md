@@ -9,6 +9,10 @@
 - Narrow exception: manually dispatch `.github/workflows/preserve-stable.yml` on the current `main` commit directly following `b8c413495fd61f7a584e7a2e239a03b5e717ccef` to preserve its already-running production OCI digest as `stable` and `latest`, without rebuilding. Only the hardcoded production digest is eligible; later source commits disable this path. No runtime changes.
 - Run `node scripts/test-workflow.mjs` after workflow edits. Application checks retain existing package managers and lint/test stacks.
 
+# Public repository privacy
+
+- Use `example.com` and generic accounts and paths in public docs, tests, issues, comments, and log examples. Keep actual deployment hosts, private identifiers, configuration, and evidence in private infrastructure sources. Never publish secrets; preserve intentional public attribution and repository URLs.
+
 # Development scope
 
 - Development uses only the modern UI and TubeArchivist plus PostgreSQL 18. No classic UI, Elasticsearch, Redis, or Celery service.
